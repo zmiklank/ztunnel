@@ -52,6 +52,17 @@ fn increase_open_files_limit() {
 fn main() -> anyhow::Result<()> {
     let _log_flush = telemetry::setup_logging();
 
+    // Initialize FIPS mode for OpenSSL only if the system is FIPS-enabled
+    #[cfg(feature = "tls-openssl")]
+    {
+        if is_system_fips_enabled() {
+            info!("System FIPS mode detected, enabling FIPS for rustls-openssl");
+            rustls_openssl::fips::enable();
+        } else {
+            info!("System FIPS mode not enabled, skipping FIPS initialization");
+        }
+    }
+
     // For now we don't need a complex CLI, so rather than pull in dependencies just use basic argv[1]
     match std::env::args().nth(1).as_deref() {
         None | Some("proxy") => (),
@@ -86,6 +97,28 @@ version         - Print the version of ztunnel
 help            - Print commands and version of ztunnel"
     );
     Ok(())
+}
+
+// Check if the system has FIPS mode enabled.
+// On Linux, this reads /proc/sys/crypto/fips_enabled.
+// Returns true if FIPS is enabled, false otherwise.
+#[cfg(feature = "tls-openssl")]
+fn is_system_fips_enabled() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/sys/crypto/fips_enabled")
+            .ok()
+            .and_then(|s| s.trim().parse::<u8>().ok())
+            .map(|v| v == 1)
+            .unwrap_or(false)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        // On non-Linux systems, we cannot reliably detect FIPS mode
+        // Default to false for safety
+        false
+    }
 }
 
 fn version() -> anyhow::Result<()> {
