@@ -55,7 +55,7 @@ pub enum Error {
 
     #[error("invalid operation: {0:?}")]
     #[cfg(feature = "tls-openssl")]
-    SslError(#[from] openssl::error::ErrorStack),
+    SslError(openssl::error::ErrorStack),
 
     #[error("invalid certificate generation: {0:?}")]
     #[cfg(any(feature = "tls-ring", feature = "tls-aws-lc"))]
@@ -78,5 +78,31 @@ impl From<InvalidUri> for Error {
 impl From<rcgen::Error> for Error {
     fn from(err: rcgen::Error) -> Self {
         Error::RcgenError(Arc::new(err))
+    }
+}
+
+#[cfg(feature = "tls-openssl")]
+impl From<openssl::error::ErrorStack> for Error {
+    fn from(err: openssl::error::ErrorStack) -> Self {
+        use tracing::error;
+
+        // Log each error in the stack immediately before it gets cleared
+        if err.errors().is_empty() {
+            error!("OpenSSL error with empty error stack - possible FIPS configuration issue");
+        } else {
+            for e in err.errors() {
+                error!(
+                    "OpenSSL Error Detail - code: 0x{:08X}, lib: {:?}, func: {:?}, reason: {:?}, file: {}, line: {}, data: {:?}",
+                    e.code(),
+                    e.library(),
+                    e.function(),
+                    e.reason(),
+                    e.file(),
+                    e.line(),
+                    e.data()
+                );
+            }
+        }
+        Error::SslError(err)
     }
 }

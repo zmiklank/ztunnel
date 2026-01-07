@@ -40,7 +40,7 @@ boring-sys = { version = "4", optional = true }
 ring = { version = "0.17", optional = true }
 
 # Enabled with 'tls-openssl'
-rustls-openssl = { version = "0.2", optional = true }
+rustls-openssl = { version = "0.2", optional = true, default-features = false }
 openssl = { version = "0.10", optional = true }
 
 anyhow = "1.0"
