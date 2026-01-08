@@ -86,11 +86,26 @@ impl From<openssl::error::ErrorStack> for Error {
     fn from(err: openssl::error::ErrorStack) -> Self {
         use tracing::error;
 
+        // ALWAYS print to stderr - bypasses logging configuration
+        eprintln!(">>> CUSTOM ERROR HANDLER CALLED <<<");
+        eprintln!(">>> Error stack length: {} <<<", err.errors().len());
+
         // Log each error in the stack immediately before it gets cleared
         if err.errors().is_empty() {
+            eprintln!(">>> OpenSSL error with EMPTY error stack - FIPS configuration issue <<<");
             error!("OpenSSL error with empty error stack - possible FIPS configuration issue");
         } else {
             for e in err.errors() {
+                eprintln!(
+                    ">>> OpenSSL Error: code=0x{:08X}, lib={:?}, func={:?}, reason={:?}, file={}, line={}, data={:?} <<<",
+                    e.code(),
+                    e.library(),
+                    e.function(),
+                    e.reason(),
+                    e.file(),
+                    e.line(),
+                    e.data()
+                );
                 error!(
                     "OpenSSL Error Detail - code: 0x{:08X}, lib: {:?}, func: {:?}, reason: {:?}, file: {}, line: {}, data: {:?}",
                     e.code(),

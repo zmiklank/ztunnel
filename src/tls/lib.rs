@@ -40,7 +40,7 @@ pub trait ServerCertProvider: Send + Sync + Clone {
     async fn fetch_cert(&mut self) -> Result<Arc<ServerConfig>, TlsError>;
 }
 
-pub(super) static TLS_VERSIONS: &[&rustls::SupportedProtocolVersion] = &[&rustls::version::TLS13];
+pub(super) static TLS_VERSIONS: &[&rustls::SupportedProtocolVersion] = &[&rustls::version::TLS13,&rustls::version::TLS12,];
 
 #[cfg(feature = "tls-aws-lc")]
 pub static CRYPTO_PROVIDER: &str = "tls-aws-lc";

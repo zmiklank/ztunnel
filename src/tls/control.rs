@@ -183,17 +183,26 @@ async fn control_plane_client_config(
     let roots = root_to_store(root_cert).await?;
     let c = ClientConfig::builder_with_provider(provider())
         .with_protocol_versions(crate::tls::TLS_VERSIONS)?;
-    if let Some(alt_hostname) = alt_hostname {
+
+    let mut config = if let Some(alt_hostname) = alt_hostname {
         debug!("using alternate hostname {alt_hostname} for TLS verification");
-        Ok(c.dangerous()
+        c.dangerous()
             .with_custom_certificate_verifier(Arc::new(AltHostnameVerifier {
                 roots: Arc::new(roots),
                 alt_server_name: ServerName::try_from(alt_hostname)?,
             }))
-            .with_no_client_auth())
+            .with_no_client_auth()
     } else {
-        Ok(c.with_root_certificates(roots).with_no_client_auth())
+        c.with_root_certificates(roots).with_no_client_auth()
+    };
+
+    // Set require_ems for FIPS compliance with TLS 1.2
+    #[cfg(feature = "tls-openssl")]
+    {
+        config.require_ems = true;
     }
+
+    Ok(config)
 }
 
 #[derive(Clone, Debug)]
