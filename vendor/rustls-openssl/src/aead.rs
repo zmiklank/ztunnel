@@ -71,10 +71,35 @@ impl Algorithm {
 
         let (ciphertext, tag) = data.split_at_mut(payload_len - TAG_LEN);
 
+        // Fetch cipher from FIPS provider instead of using legacy method
+        #[cfg(ossl300)]
+        let cipher = {
+            let algorithm = match self {
+                Self::Aes128Gcm => "AES-128-GCM",
+                Self::Aes256Gcm => "AES-256-GCM",
+                #[cfg(all(chacha, not(feature = "fips")))]
+                Self::ChaCha20Poly1305 => "ChaCha20-Poly1305",
+            };
+            Cipher::fetch(None, algorithm, Some("fips=yes"))
+                .or_else(|_| Cipher::fetch(None, algorithm, None))
+                .map_err(|e| Error::General(format!("Failed to fetch cipher: {e}")))?
+        };
+
+        #[cfg(not(ossl300))]
+        let cipher = self.openssl_cipher();
+
+        let cipher_ref: &CipherRef = {
+            #[cfg(ossl300)]
+            { &cipher }
+            #[cfg(not(ossl300))]
+            { cipher }
+        };
+
         CipherCtx::new()
             .and_then(|mut ctx| {
                 // Two-step init required for OpenSSL 3.x FIPS provider
-                ctx.decrypt_init(Some(self.openssl_cipher()), None, None)?;
+                ctx.decrypt_init(Some(cipher_ref), None, None)?;
+
                 ctx.set_iv_length(NONCE_LEN)?;
                 ctx.decrypt_init(None, Some(key), Some(nonce))?;
                 // Set tag before processing data (FIPS requirement)
