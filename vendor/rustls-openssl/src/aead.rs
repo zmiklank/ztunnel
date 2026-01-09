@@ -71,28 +71,24 @@ impl Algorithm {
 
         let (ciphertext, tag) = data.split_at_mut(payload_len - TAG_LEN);
 
-        // Fetch cipher from FIPS provider instead of using legacy method
-        #[cfg(ossl300)]
-        let cipher = {
+        // For OpenSSL 3.x, fetch cipher from FIPS provider at runtime
+        // Runtime detection avoids mismatch between build-time and runtime OpenSSL versions
+        let is_openssl_3 = openssl::version::number() >= 0x3_00_00_00_0;
+
+        let fetched_cipher;
+        let cipher_ref: &CipherRef = if is_openssl_3 {
             let algorithm = match self {
                 Self::Aes128Gcm => "AES-128-GCM",
                 Self::Aes256Gcm => "AES-256-GCM",
                 #[cfg(all(chacha, not(feature = "fips")))]
                 Self::ChaCha20Poly1305 => "ChaCha20-Poly1305",
             };
-            Cipher::fetch(None, algorithm, Some("fips=yes"))
+            fetched_cipher = Cipher::fetch(None, algorithm, Some("fips=yes"))
                 .or_else(|_| Cipher::fetch(None, algorithm, None))
-                .map_err(|e| Error::General(format!("Failed to fetch cipher: {e}")))?
-        };
-
-        #[cfg(not(ossl300))]
-        let cipher = self.openssl_cipher();
-
-        let cipher_ref: &CipherRef = {
-            #[cfg(ossl300)]
-            { &cipher }
-            #[cfg(not(ossl300))]
-            { cipher }
+                .map_err(|e| Error::General(format!("Failed to fetch cipher: {e}")))?;
+            &fetched_cipher
+        } else {
+            self.openssl_cipher()
         };
 
         CipherCtx::new()
