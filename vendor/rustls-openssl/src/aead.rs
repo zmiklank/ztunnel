@@ -78,7 +78,8 @@ impl Algorithm {
                 ctx.cipher_update(aad, None)?;
                 let count = ctx.cipher_update_inplace(ciphertext, ciphertext.len())?;
                 debug_assert!(count == ciphertext.len());
-                let rest = ctx.cipher_final(&mut [])?;
+                let mut final_buf = [0u8; 16];
+                let rest = ctx.cipher_final(&mut final_buf)?;
                 debug_assert!(rest == 0);
                 Ok(count + rest)
             })
