@@ -73,11 +73,16 @@ impl Algorithm {
 
         CipherCtx::new()
             .and_then(|mut ctx| {
-                ctx.decrypt_init(Some(self.openssl_cipher()), Some(key), Some(nonce))?;
+                // Two-step init required for OpenSSL 3.x FIPS provider
+                ctx.decrypt_init(Some(self.openssl_cipher()), None, None)?;
+                ctx.set_iv_length(NONCE_LEN)?;
+                ctx.decrypt_init(None, Some(key), Some(nonce))?;
+                // Set tag before processing data (FIPS requirement)
                 ctx.set_tag(tag)?;
                 ctx.cipher_update(aad, None)?;
                 let count = ctx.cipher_update_inplace(ciphertext, ciphertext.len())?;
                 debug_assert!(count == ciphertext.len());
+                // Provide valid buffer for FIPS strict pointer validation
                 let mut final_buf = [0u8; 16];
                 let rest = ctx.cipher_final(&mut final_buf)?;
                 debug_assert!(rest == 0);
