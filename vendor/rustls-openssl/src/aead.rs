@@ -69,14 +69,18 @@ impl Algorithm {
 
         CipherCtx::new()
             .and_then(|mut ctx| {
-                ctx.encrypt_init(Some(cipher_ref), Some(key), Some(nonce))?;
+                // Two-step init required for OpenSSL 3.x FIPS provider
+                ctx.encrypt_init(Some(cipher_ref), None, None)?;
+                ctx.set_iv_length(NONCE_LEN)?;
+                ctx.encrypt_init(None, Some(key), Some(nonce))?;
                 // Providing no output buffer implies input is AAD.
                 ctx.cipher_update(aad, None)?;
                 // The ciphers are all stream ciphers, so we shound encrypt the same amount of data...
                 let count = ctx.cipher_update_inplace(data, data.len())?;
                 debug_assert!(count == data.len());
-                // ... and no more data should be written at the end.
-                let rest = ctx.cipher_final(&mut [])?;
+                // Provide valid buffer for FIPS strict pointer validation
+                let mut final_buf = [0u8; 16];
+                let rest = ctx.cipher_final(&mut final_buf)?;
                 debug_assert!(rest == 0);
                 let mut tag = [0u8; TAG_LEN];
                 ctx.tag(&mut tag)?;
