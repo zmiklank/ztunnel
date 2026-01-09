@@ -24,7 +24,25 @@ impl Algorithm {
         }
     }
 
+    fn algorithm_name(self) -> &'static str {
+        match self {
+            Self::Aes128Gcm => "AES-128-GCM",
+            Self::Aes256Gcm => "AES-256-GCM",
+            #[cfg(all(chacha, not(feature = "fips")))]
+            Self::ChaCha20Poly1305 => "ChaCha20-Poly1305",
+        }
+    }
+
     pub(crate) fn key_size(self) -> usize {
+        // For OpenSSL 3.x, fetch cipher from provider to get correct key size
+        let is_openssl_3 = openssl::version::number() >= 0x3_00_00_00_0;
+        if is_openssl_3 {
+            if let Ok(cipher) = Cipher::fetch(None, self.algorithm_name(), Some("fips=yes"))
+                .or_else(|_| Cipher::fetch(None, self.algorithm_name(), None))
+            {
+                return cipher.key_length();
+            }
+        }
         self.openssl_cipher().key_length()
     }
 
@@ -36,9 +54,22 @@ impl Algorithm {
         aad: &[u8],
         data: &mut [u8],
     ) -> Result<[u8; TAG_LEN], Error> {
+        // For OpenSSL 3.x, fetch cipher from FIPS provider at runtime
+        let is_openssl_3 = openssl::version::number() >= 0x3_00_00_00_0;
+
+        let fetched_cipher;
+        let cipher_ref: &CipherRef = if is_openssl_3 {
+            fetched_cipher = Cipher::fetch(None, self.algorithm_name(), Some("fips=yes"))
+                .or_else(|_| Cipher::fetch(None, self.algorithm_name(), None))
+                .map_err(|e| Error::General(format!("Failed to fetch cipher: {e}")))?;
+            &fetched_cipher
+        } else {
+            self.openssl_cipher()
+        };
+
         CipherCtx::new()
             .and_then(|mut ctx| {
-                ctx.encrypt_init(Some(self.openssl_cipher()), Some(key), Some(nonce))?;
+                ctx.encrypt_init(Some(cipher_ref), Some(key), Some(nonce))?;
                 // Providing no output buffer implies input is AAD.
                 ctx.cipher_update(aad, None)?;
                 // The ciphers are all stream ciphers, so we shound encrypt the same amount of data...
@@ -77,14 +108,8 @@ impl Algorithm {
 
         let fetched_cipher;
         let cipher_ref: &CipherRef = if is_openssl_3 {
-            let algorithm = match self {
-                Self::Aes128Gcm => "AES-128-GCM",
-                Self::Aes256Gcm => "AES-256-GCM",
-                #[cfg(all(chacha, not(feature = "fips")))]
-                Self::ChaCha20Poly1305 => "ChaCha20-Poly1305",
-            };
-            fetched_cipher = Cipher::fetch(None, algorithm, Some("fips=yes"))
-                .or_else(|_| Cipher::fetch(None, algorithm, None))
+            fetched_cipher = Cipher::fetch(None, self.algorithm_name(), Some("fips=yes"))
+                .or_else(|_| Cipher::fetch(None, self.algorithm_name(), None))
                 .map_err(|e| Error::General(format!("Failed to fetch cipher: {e}")))?;
             &fetched_cipher
         } else {
