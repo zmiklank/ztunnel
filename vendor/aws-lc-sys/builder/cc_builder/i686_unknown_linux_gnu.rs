@@ -1,6 +1,6 @@
 // Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
 // SPDX-License-Identifier: Apache-2.0 OR ISC
-// Mon Mar 31 12:20:09 UTC 2025
+// Mon Dec 15 15:06:53 UTC 2025
 
 use crate::cc_builder::Library;
 
@@ -39,12 +39,15 @@ pub(super) const CRYPTO_LIBRARY: Library = Library {
         "crypto/asn1/tasn_utl.c",
         "crypto/base64/base64.c",
         "crypto/bio/bio.c",
+        "crypto/bio/bio_addr.c",
         "crypto/bio/bio_mem.c",
         "crypto/bio/connect.c",
+        "crypto/bio/dgram.c",
         "crypto/bio/errno.c",
         "crypto/bio/fd.c",
         "crypto/bio/file.c",
         "crypto/bio/hexdump.c",
+        "crypto/bio/md.c",
         "crypto/bio/pair.c",
         "crypto/bio/printf.c",
         "crypto/bio/socket.c",
@@ -73,6 +76,7 @@ pub(super) const CRYPTO_LIBRARY: Library = Library {
         "crypto/cipher_extra/e_tls.c",
         "crypto/cipher_extra/tls_cbc.c",
         "crypto/conf/conf.c",
+        "crypto/console/console.c",
         "crypto/crypto.c",
         "crypto/decrepit/bio/base64_bio.c",
         "crypto/decrepit/blowfish/blowfish.c",
@@ -147,7 +151,6 @@ pub(super) const CRYPTO_LIBRARY: Library = Library {
         "crypto/pem/pem_x509.c",
         "crypto/pem/pem_xaux.c",
         "crypto/pkcs7/bio/cipher.c",
-        "crypto/pkcs7/bio/md.c",
         "crypto/pkcs7/pkcs7.c",
         "crypto/pkcs7/pkcs7_asn1.c",
         "crypto/pkcs7/pkcs7_x509.c",
@@ -158,10 +161,12 @@ pub(super) const CRYPTO_LIBRARY: Library = Library {
         "crypto/poly1305/poly1305_arm.c",
         "crypto/poly1305/poly1305_vec.c",
         "crypto/pool/pool.c",
+        "crypto/rand_extra/ccrandomgeneratebytes.c",
         "crypto/rand_extra/deterministic.c",
-        "crypto/rand_extra/entropy_passive.c",
-        "crypto/rand_extra/forkunsafe.c",
+        "crypto/rand_extra/getentropy.c",
         "crypto/rand_extra/rand_extra.c",
+        "crypto/rand_extra/urandom.c",
+        "crypto/rand_extra/vm_ube_fallback.c",
         "crypto/rand_extra/windows.c",
         "crypto/rc4/rc4.c",
         "crypto/refcount_c11.c",
@@ -181,6 +186,10 @@ pub(super) const CRYPTO_LIBRARY: Library = Library {
         "crypto/trust_token/pmbtoken.c",
         "crypto/trust_token/trust_token.c",
         "crypto/trust_token/voprf.c",
+        "crypto/ube/fork_ube_detect.c",
+        "crypto/ube/ube.c",
+        "crypto/ube/vm_ube_detect.c",
+        "crypto/ui/ui.c",
         "crypto/x509/a_digest.c",
         "crypto/x509/a_sign.c",
         "crypto/x509/a_verify.c",
@@ -265,5 +274,11 @@ pub(super) const CRYPTO_LIBRARY: Library = Library {
         "generated-src/linux-x86/crypto/fipsmodule/vpaes-x86.S",
         "generated-src/linux-x86/crypto/fipsmodule/x86-mont.S",
         "generated-src/linux-x86/crypto/test/trampoline-x86.S",
+        "third_party/jitterentropy/jitterentropy-library/src/jitterentropy-base.c",
+        "third_party/jitterentropy/jitterentropy-library/src/jitterentropy-gcd.c",
+        "third_party/jitterentropy/jitterentropy-library/src/jitterentropy-health.c",
+        "third_party/jitterentropy/jitterentropy-library/src/jitterentropy-noise.c",
+        "third_party/jitterentropy/jitterentropy-library/src/jitterentropy-sha3.c",
+        "third_party/jitterentropy/jitterentropy-library/src/jitterentropy-timer.c",
     ],
 };

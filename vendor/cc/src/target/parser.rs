@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, mem};
 
 use crate::{target::TargetInfo, utilities::OnceLock, Error, ErrorKind};
 
@@ -67,12 +67,24 @@ impl TargetInfoParserInner {
         let arch = cargo_env("CARGO_CFG_TARGET_ARCH", ft.map(|t| t.arch))?;
         let vendor = cargo_env("CARGO_CFG_TARGET_VENDOR", ft.map(|t| t.vendor))?;
         let os = cargo_env("CARGO_CFG_TARGET_OS", ft.map(|t| t.os))?;
-        let env = cargo_env("CARGO_CFG_TARGET_ENV", ft.map(|t| t.env))?;
+        let mut env = cargo_env("CARGO_CFG_TARGET_ENV", ft.map(|t| t.env))?;
         // `target_abi` was stabilized in Rust 1.78, which is higher than our
         // MSRV, so it may not always be available; In that case, fall back to
         // `""`, which is _probably_ correct for unknown target names.
-        let abi = cargo_env("CARGO_CFG_TARGET_ABI", ft.map(|t| t.abi))
+        let mut abi = cargo_env("CARGO_CFG_TARGET_ABI", ft.map(|t| t.abi))
             .unwrap_or_else(|_| String::default().into_boxed_str());
+
+        // Remove `macabi` and `sim` from `target_abi` (if present), it's been moved to `target_env`.
+        // TODO: Remove once MSRV is bumped to 1.91 and `rustc` removes these from `target_abi`.
+        if matches!(&*abi, "macabi" | "sim") {
+            debug_assert!(
+                matches!(&*env, "" | "macabi" | "sim"),
+                "env/abi mismatch: {:?}, {:?}",
+                env,
+                abi,
+            );
+            env = mem::replace(&mut abi, String::default().into_boxed_str());
+        }
 
         Ok(Self {
             full_arch: full_arch.to_string().into_boxed_str(),
@@ -184,6 +196,10 @@ fn parse_arch(full_arch: &str) -> Option<&str> {
         "s390x" => "s390x",
         "xtensa" => "xtensa",
 
+        // Arches supported by gcc, but not LLVM.
+        arch if arch.starts_with("alpha") => "alpha", // DEC Alpha
+        "hppa" => "hppa", // https://en.wikipedia.org/wiki/PA-RISC, also known as HPPA
+        arch if arch.starts_with("sh") => "sh", // SuperH
         _ => return None,
     })
 }
@@ -221,14 +237,15 @@ fn parse_envabi(last_component: &str) -> Option<(&str, &str)> {
         "qnx800" => ("nto80", ""),
         "sgx" => ("sgx", ""),
         "threads" => ("threads", ""),
+        "mlibc" => ("mlibc", ""),
 
         // ABIs
         "abi64" => ("", "abi64"),
         "abiv2" => ("", "spe"),
         "eabi" => ("", "eabi"),
         "eabihf" => ("", "eabihf"),
-        "macabi" => ("", "macabi"),
-        "sim" => ("", "sim"),
+        "macabi" => ("macabi", ""),
+        "sim" => ("sim", ""),
         "softfloat" => ("", "softfloat"),
         "spe" => ("", "spe"),
         "x32" => ("", "x32"),
@@ -258,6 +275,17 @@ impl<'a> TargetInfo<'a> {
                 os: "linux",
                 env: "",
                 abi: "",
+            });
+        }
+
+        if target == "armv7a-vex-v5" {
+            return Ok(Self {
+                full_arch: "armv7a",
+                arch: "arm",
+                vendor: "vex",
+                os: "vexos",
+                env: "v5",
+                abi: "eabihf",
             });
         }
 
@@ -339,7 +367,7 @@ impl<'a> TargetInfo<'a> {
         match target {
             // Actually simulator targets.
             "i386-apple-ios" | "x86_64-apple-ios" | "x86_64-apple-tvos" => {
-                abi = "sim";
+                env = "sim";
             }
             // Name should've contained `muslabi64`.
             "mips64-openwrt-linux-musl" => {
@@ -387,6 +415,7 @@ impl<'a> TargetInfo<'a> {
             // FIXME(madsmtm): Fix in `rustc` after
             // https://github.com/rust-lang/compiler-team/issues/850.
             "wali" => "unknown",
+            "lynx" => "unknown",
             // Some Linux distributions set their name as the target vendor,
             // so we have to assume that it can be an arbitary string.
             vendor => vendor,
@@ -399,6 +428,21 @@ impl<'a> TargetInfo<'a> {
         }
         if vendor == "uwp" {
             abi = "uwp";
+        }
+        if ["powerpc64-unknown-linux-gnu", "powerpc64-wrs-vxworks"].contains(&target) {
+            abi = "elfv1";
+        }
+        if [
+            "powerpc64-unknown-freebsd",
+            "powerpc64-unknown-linux-musl",
+            "powerpc64-unknown-openbsd",
+            "powerpc64le-unknown-freebsd",
+            "powerpc64le-unknown-linux-gnu",
+            "powerpc64le-unknown-linux-musl",
+        ]
+        .contains(&target)
+        {
+            abi = "elfv2";
         }
 
         Ok(Self {
@@ -462,6 +506,7 @@ mod tests {
             "x86_64-foxkit-linux-musl",
             "arm-poky-linux-gnueabi",
             "x86_64-unknown-moturus",
+            "x86_64-unknown-managarm-mlibc",
         ];
 
         for target in targets {
@@ -505,6 +550,11 @@ mod tests {
             } else {
                 // Skip cfgs like `debug_assertions` and `unix`.
             }
+        }
+
+        if matches!(target.abi, "macabi" | "sim") {
+            assert_eq!(target.env, target.abi);
+            target.abi = "";
         }
 
         target
@@ -558,5 +608,31 @@ mod tests {
         if has_failure {
             panic!("failed comparing targets");
         }
+    }
+
+    #[test]
+    fn parses_apple_envs_correctly() {
+        assert_eq!(
+            TargetInfo::from_rustc_target("aarch64-apple-ios-macabi").unwrap(),
+            TargetInfo {
+                full_arch: "aarch64",
+                arch: "aarch64",
+                vendor: "apple",
+                os: "ios",
+                env: "macabi",
+                abi: "",
+            }
+        );
+        assert_eq!(
+            TargetInfo::from_rustc_target("aarch64-apple-ios-sim").unwrap(),
+            TargetInfo {
+                full_arch: "aarch64",
+                arch: "aarch64",
+                vendor: "apple",
+                os: "ios",
+                env: "sim",
+                abi: "",
+            }
+        );
     }
 }

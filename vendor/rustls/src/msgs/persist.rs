@@ -7,11 +7,11 @@ use zeroize::Zeroizing;
 use crate::client::ResolvesClientCert;
 use crate::enums::{CipherSuite, ProtocolVersion};
 use crate::error::InvalidMessage;
-use crate::msgs::base::{PayloadU8, PayloadU16};
+use crate::msgs::base::{MaybeEmpty, PayloadU8, PayloadU16};
 use crate::msgs::codec::{Codec, Reader};
-use crate::msgs::handshake::CertificateChain;
 #[cfg(feature = "tls12")]
 use crate::msgs::handshake::SessionId;
+use crate::msgs::handshake::{CertificateChain, ProtocolName};
 use crate::sync::{Arc, Weak};
 #[cfg(feature = "tls12")]
 use crate::tls12::Tls12CipherSuite;
@@ -104,7 +104,7 @@ impl Tls13ClientSessionValue {
                 server_cert_verifier,
                 client_creds,
             ),
-            quic_params: PayloadU16(Vec::new()),
+            quic_params: PayloadU16::new(Vec::new()),
         }
     }
 
@@ -129,7 +129,7 @@ impl Tls13ClientSessionValue {
     }
 
     pub fn set_quic_params(&mut self, quic_params: &[u8]) {
-        self.quic_params = PayloadU16(quic_params.to_vec());
+        self.quic_params = PayloadU16::new(quic_params.to_vec());
     }
 
     pub fn quic_params(&self) -> Vec<u8> {
@@ -189,7 +189,7 @@ impl Tls12ClientSessionValue {
     }
 
     pub(crate) fn ticket(&mut self) -> Arc<PayloadU16> {
-        Arc::clone(&self.common.ticket)
+        self.common.ticket.clone()
     }
 
     pub(crate) fn extended_ms(&self) -> bool {
@@ -239,7 +239,7 @@ impl ClientSessionCommon {
     ) -> Self {
         Self {
             ticket,
-            secret: Zeroizing::new(PayloadU8(secret.to_vec())),
+            secret: Zeroizing::new(PayloadU8::new(secret.to_vec())),
             epoch: time_now.as_secs(),
             lifetime_secs: cmp::min(lifetime_secs, MAX_TICKET_LIFETIME),
             server_cert_chain: Arc::new(server_cert_chain),
@@ -316,7 +316,7 @@ impl Codec<'_> for ServerSessionValue {
         if let Some(sni) = &self.sni {
             1u8.encode(bytes);
             let sni_bytes: &str = sni.as_ref();
-            PayloadU8::new(Vec::from(sni_bytes)).encode(bytes);
+            PayloadU8::<MaybeEmpty>::encode_slice(sni_bytes.as_bytes(), bytes);
         } else {
             0u8.encode(bytes);
         }
@@ -345,7 +345,7 @@ impl Codec<'_> for ServerSessionValue {
     fn read(r: &mut Reader<'_>) -> Result<Self, InvalidMessage> {
         let has_sni = u8::read(r)?;
         let sni = if has_sni == 1 {
-            let dns_name = PayloadU8::read(r)?;
+            let dns_name = PayloadU8::<MaybeEmpty>::read(r)?;
             let dns_name = match DnsName::try_from(dns_name.0.as_slice()) {
                 Ok(dns_name) => dns_name.to_owned(),
                 Err(_) => return Err(InvalidMessage::InvalidServerName),
@@ -399,7 +399,7 @@ impl ServerSessionValue {
         cs: CipherSuite,
         ms: &[u8],
         client_cert_chain: Option<CertificateChain<'static>>,
-        alpn: Option<Vec<u8>>,
+        alpn: Option<ProtocolName>,
         application_data: Vec<u8>,
         creation_time: UnixTime,
         age_obfuscation_offset: u32,
@@ -411,7 +411,7 @@ impl ServerSessionValue {
             master_secret: Zeroizing::new(PayloadU8::new(ms.to_vec())),
             extended_ms: false,
             client_cert_chain,
-            alpn: alpn.map(PayloadU8::new),
+            alpn: alpn.map(|p| PayloadU8::new(p.as_ref().to_vec())),
             application_data: PayloadU16::new(application_data),
             creation_time_sec: creation_time.as_secs(),
             age_obfuscation_offset,
@@ -435,11 +435,7 @@ impl ServerSessionValue {
             .saturating_sub(self.creation_time_sec) as u32)
             .saturating_mul(1000);
 
-        let age_difference = if client_age_ms < server_age_ms {
-            server_age_ms - client_age_ms
-        } else {
-            client_age_ms - server_age_ms
-        };
+        let age_difference = server_age_ms.abs_diff(client_age_ms);
 
         self.freshness = Some(age_difference <= MAX_FRESHNESS_SKEW_MS);
         self
@@ -469,7 +465,7 @@ mod tests {
             UnixTime::now(),
             0x12345678,
         );
-        println!("{:?}", ssv);
+        println!("{ssv:?}");
     }
 
     #[test]

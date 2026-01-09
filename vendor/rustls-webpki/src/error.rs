@@ -19,9 +19,11 @@ use alloc::vec::Vec;
 use core::fmt;
 use core::ops::ControlFlow;
 
-#[cfg(feature = "alloc")]
-use pki_types::ServerName;
 use pki_types::UnixTime;
+#[cfg(feature = "alloc")]
+use pki_types::{AlgorithmIdentifier, ServerName};
+
+use crate::verify_cert::RequiredEkuNotFoundContext;
 
 /// An error that occurs during certificate validation or name validation.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +70,9 @@ pub enum Error {
         /// The nextUpdate time of the CRL.
         next_update: UnixTime,
     },
+
+    /// The certificate has an Extended Key Usage extension without any EKU values.
+    EmptyEkuExtension,
 
     /// An end-entity certificate is being used as a CA certificate.
     EndEntityUsedAsCa,
@@ -141,7 +146,12 @@ pub enum Error {
 
     /// The certificate is not valid for the Extended Key Usage for which it is
     /// being validated.
+    #[deprecated(since = "0.103.2", note = "use RequiredEkuNotFoundContext instead")]
     RequiredEkuNotFound,
+
+    /// The certificate is not valid for the Extended Key Usage for which it is
+    /// being validated.
+    RequiredEkuNotFoundContext(RequiredEkuNotFoundContext),
 
     /// The algorithm in the TBSCertificate "signature" field of a certificate
     /// does not match the algorithm in the signature of the certificate.
@@ -194,11 +204,27 @@ pub enum Error {
 
     /// The signature algorithm for a signature over a CRL is not in the set of supported
     /// signature algorithms given.
+    #[deprecated(
+        since = "0.103.4",
+        note = "use UnsupportedCrlSignatureAlgorithmContext instead"
+    )]
     UnsupportedCrlSignatureAlgorithm,
 
     /// The signature algorithm for a signature is not in the set of supported
     /// signature algorithms given.
+    UnsupportedCrlSignatureAlgorithmContext(UnsupportedSignatureAlgorithmContext),
+
+    /// The signature algorithm for a signature is not in the set of supported
+    /// signature algorithms given.
+    #[deprecated(
+        since = "0.103.4",
+        note = "use UnsupportedSignatureAlgorithmContext instead"
+    )]
     UnsupportedSignatureAlgorithm,
+
+    /// The signature algorithm for a signature is not in the set of supported
+    /// signature algorithms given.
+    UnsupportedSignatureAlgorithmContext(UnsupportedSignatureAlgorithmContext),
 
     /// The CRL signature's algorithm does not match the algorithm of the issuer
     /// public key it is being validated for. This may be because the public key
@@ -207,6 +233,10 @@ pub enum Error {
     /// algorithm (e.g. ECC keys for unsupported curves), or the public key
     /// algorithm and the signature algorithm simply don't match (e.g.
     /// verifying an RSA signature with an ECC public key).
+    #[deprecated(
+        since = "0.103.4",
+        note = "use UnsupportedCrlSignatureAlgorithmForPublicKeyContext instead"
+    )]
     UnsupportedCrlSignatureAlgorithmForPublicKey,
 
     /// The signature's algorithm does not match the algorithm of the public
@@ -216,7 +246,33 @@ pub enum Error {
     /// algorithm (e.g. ECC keys for unsupported curves), or the public key
     /// algorithm and the signature algorithm simply don't match (e.g.
     /// verifying an RSA signature with an ECC public key).
+    UnsupportedCrlSignatureAlgorithmForPublicKeyContext(
+        UnsupportedSignatureAlgorithmForPublicKeyContext,
+    ),
+
+    /// The signature's algorithm does not match the algorithm of the public
+    /// key it is being validated for. This may be because the public key
+    /// algorithm's OID isn't recognized (e.g. DSA), or the public key
+    /// algorithm's parameters don't match the supported parameters for that
+    /// algorithm (e.g. ECC keys for unsupported curves), or the public key
+    /// algorithm and the signature algorithm simply don't match (e.g.
+    /// verifying an RSA signature with an ECC public key).
+    #[deprecated(
+        since = "0.103.4",
+        note = "use UnsupportedSignatureAlgorithmForPublicKeyContext instead"
+    )]
     UnsupportedSignatureAlgorithmForPublicKey,
+
+    /// The signature's algorithm does not match the algorithm of the public
+    /// key it is being validated for. This may be because the public key
+    /// algorithm's OID isn't recognized (e.g. DSA), or the public key
+    /// algorithm's parameters don't match the supported parameters for that
+    /// algorithm (e.g. ECC keys for unsupported curves), or the public key
+    /// algorithm and the signature algorithm simply don't match (e.g.
+    /// verifying an RSA signature with an ECC public key).
+    UnsupportedSignatureAlgorithmForPublicKeyContext(
+        UnsupportedSignatureAlgorithmForPublicKeyContext,
+    ),
 }
 
 impl Error {
@@ -239,7 +295,9 @@ impl Error {
             Self::CertRevoked | Self::UnknownRevocationStatus | Self::CrlExpired { .. } => 270,
             Self::InvalidCrlSignatureForPublicKey | Self::InvalidSignatureForPublicKey => 260,
             Self::SignatureAlgorithmMismatch => 250,
-            Self::RequiredEkuNotFound => 240,
+            Self::EmptyEkuExtension => 245,
+            #[allow(deprecated)]
+            Self::RequiredEkuNotFound | Self::RequiredEkuNotFoundContext(_) => 240,
             Self::NameConstraintViolation => 230,
             Self::PathLenConstraintViolated => 220,
             Self::CaUsedAsEndEntity | Self::EndEntityUsedAsCa => 210,
@@ -252,9 +310,16 @@ impl Error {
             Self::InvalidCrlNumber => 160,
 
             // Errors related to unsupported features.
+            #[allow(deprecated)]
             Self::UnsupportedCrlSignatureAlgorithmForPublicKey
-            | Self::UnsupportedSignatureAlgorithmForPublicKey => 150,
-            Self::UnsupportedCrlSignatureAlgorithm | Self::UnsupportedSignatureAlgorithm => 140,
+            | Self::UnsupportedCrlSignatureAlgorithmForPublicKeyContext(_)
+            | Self::UnsupportedSignatureAlgorithmForPublicKey
+            | Self::UnsupportedSignatureAlgorithmForPublicKeyContext(_) => 150,
+            #[allow(deprecated)]
+            Self::UnsupportedCrlSignatureAlgorithm
+            | Self::UnsupportedCrlSignatureAlgorithmContext(_)
+            | Self::UnsupportedSignatureAlgorithm
+            | Self::UnsupportedSignatureAlgorithmContext(_) => 140,
             Self::UnsupportedCriticalExtension => 130,
             Self::UnsupportedCertVersion => 130,
             Self::UnsupportedCrlVersion => 120,
@@ -312,7 +377,7 @@ impl From<Error> for ControlFlow<Error, Error> {
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self)
+        write!(f, "{self:?}")
     }
 }
 
@@ -333,6 +398,32 @@ pub struct InvalidNameContext {
     /// with or without a wildcard label as well as IP address names.
     #[cfg(feature = "alloc")]
     pub presented: Vec<String>,
+}
+
+/// Additional context for the `UnsupportedSignatureAlgorithmForPublicKey` error variant.
+///
+/// The contents of this type depend on whether the `alloc` feature is enabled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnsupportedSignatureAlgorithmForPublicKeyContext {
+    /// The signature algorithm OID.
+    #[cfg(feature = "alloc")]
+    pub signature_algorithm_id: Vec<u8>,
+    /// The public key algorithm OID.
+    #[cfg(feature = "alloc")]
+    pub public_key_algorithm_id: Vec<u8>,
+}
+
+/// Additional context for the `UnsupportedSignatureAlgorithm` error variant.
+///
+/// The contents of this type depend on whether the `alloc` feature is enabled.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct UnsupportedSignatureAlgorithmContext {
+    /// The signature algorithm OID that was unsupported.
+    #[cfg(feature = "alloc")]
+    pub signature_algorithm_id: Vec<u8>,
+    /// Supported algorithms that were available for signature verification.
+    #[cfg(feature = "alloc")]
+    pub supported_algorithms: Vec<AlgorithmIdentifier>,
 }
 
 /// Trailing data was found while parsing DER-encoded input for the named type.

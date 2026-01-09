@@ -34,6 +34,7 @@
 #pragma bss_seg(".fipsbs$b")
 #endif
 
+#include <openssl/chacha.h>
 #include <openssl/digest.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -77,6 +78,7 @@
 #include "cpucap/cpu_aarch64_apple.c"
 #include "cpucap/cpu_aarch64_freebsd.c"
 #include "cpucap/cpu_aarch64_linux.c"
+#include "cpucap/cpu_aarch64_netbsd.c"
 #include "cpucap/cpu_aarch64_openbsd.c"
 #include "cpucap/cpu_aarch64_win.c"
 #include "cpucap/cpu_arm_freebsd.c"
@@ -141,10 +143,9 @@
 #include "pbkdf/pbkdf.c"
 #include "pqdsa/pqdsa.c"
 #include "rand/ctrdrbg.c"
-#include "rand/fork_detect.c"
 #include "rand/rand.c"
-#include "rand/snapsafe_detect.c"
-#include "rand/urandom.c"
+#include "rand/entropy/entropy_sources.c"
+#include "rand/entropy/tree_drbg_jitter_entropy.c"
 #include "rsa/blinding.c"
 #include "rsa/padding.c"
 #include "rsa/rsa.c"
@@ -246,7 +247,7 @@ static void BORINGSSL_maybe_set_module_text_permissions(int permission) {
     perror("BoringSSL: mprotect");
   }
 }
-#else
+#elif !defined(OPENSSL_WINDOWS)
 static void BORINGSSL_maybe_set_module_text_permissions(int _permission) {}
 #endif  // !ANDROID
 
@@ -277,11 +278,9 @@ static void BORINGSSL_bcm_power_on_self_test(void) {
   OPENSSL_cpuid_setup();
 #endif
 
-#if defined(FIPS_ENTROPY_SOURCE_JITTER_CPU)
   if (jent_entropy_init()) {
     AWS_LC_FIPS_failure("CPU Jitter entropy RNG initialization failed");
   }
-#endif
 
 #if !defined(OPENSSL_ASAN)
   // Integrity tests cannot run under ASAN because it involves reading the full
@@ -416,7 +415,7 @@ void AWS_LC_FIPS_failure(const char* message) {
 }
 #else  // BORINGSSL_FIPS
 void AWS_LC_FIPS_failure(const char* message) {
-  fprintf(stderr, "AWS-LC FIPS failure caused by:\n%s\n", message);
+  fprintf(stderr, "AWS-LC FIPS failure caused by:\n%s\n", message); // NOLINT(clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling)
   fflush(stderr);
 }
 #endif  // BORINGSSL_FIPS

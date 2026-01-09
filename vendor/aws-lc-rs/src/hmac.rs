@@ -102,11 +102,9 @@ use crate::aws_lc::{
 use crate::error::Unspecified;
 use crate::fips::indicator_check;
 use crate::{constant_time, digest, hkdf};
+use core::ffi::c_uint;
 use core::mem::MaybeUninit;
 use core::ptr::null_mut;
-// TODO: Uncomment when MSRV >= 1.64
-// use core::ffi::c_uint;
-use std::os::raw::c_uint;
 
 /// A deprecated alias for `Tag`.
 #[deprecated]
@@ -135,19 +133,19 @@ impl Algorithm {
 }
 
 /// HMAC using SHA-1. Obsolete.
-pub static HMAC_SHA1_FOR_LEGACY_USE_ONLY: Algorithm = Algorithm(&digest::SHA1_FOR_LEGACY_USE_ONLY);
+pub const HMAC_SHA1_FOR_LEGACY_USE_ONLY: Algorithm = Algorithm(&digest::SHA1_FOR_LEGACY_USE_ONLY);
 
 /// HMAC using SHA-224.
-pub static HMAC_SHA224: Algorithm = Algorithm(&digest::SHA224);
+pub const HMAC_SHA224: Algorithm = Algorithm(&digest::SHA224);
 
 /// HMAC using SHA-256.
-pub static HMAC_SHA256: Algorithm = Algorithm(&digest::SHA256);
+pub const HMAC_SHA256: Algorithm = Algorithm(&digest::SHA256);
 
 /// HMAC using SHA-384.
-pub static HMAC_SHA384: Algorithm = Algorithm(&digest::SHA384);
+pub const HMAC_SHA384: Algorithm = Algorithm(&digest::SHA384);
 
 /// HMAC using SHA-512.
-pub static HMAC_SHA512: Algorithm = Algorithm(&digest::SHA512);
+pub const HMAC_SHA512: Algorithm = Algorithm(&digest::SHA512);
 
 /// An HMAC tag.
 ///
@@ -302,7 +300,7 @@ impl Key {
                 ctx.as_mut_ptr(),
                 key_value.as_ptr().cast(),
                 key_value.len(),
-                *evp_md_type,
+                evp_md_type.as_const_ptr(),
                 null_mut(),
             ) {
                 return Err(Unspecified);

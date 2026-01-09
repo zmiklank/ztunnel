@@ -1,6 +1,6 @@
 [package]
 name = "rustls"
-version = "0.23.26"
+version = "0.23.36"
 edition = "2021"
 rust-version = "1.71"
 license = "Apache-2.0 OR ISC OR MIT"
@@ -15,7 +15,7 @@ exclude = ["src/testdata", "tests/**"]
 build = "build.rs"
 
 [features]
-default = ["aws_lc_rs", "logging", "std", "tls12"]
+default = ["aws_lc_rs", "logging", "prefer-post-quantum", "std", "tls12"]
 
 aws-lc-rs = ["aws_lc_rs"] # Alias because Cargo features commonly use `-`
 aws_lc_rs = ["dep:aws-lc-rs", "webpki/aws-lc-rs", "aws-lc-rs/aws-lc-sys", "aws-lc-rs/prebuilt-nasm"]
@@ -57,6 +57,7 @@ log = { workspace = true }
 macro_rules_attribute = { workspace = true }
 num-bigint = { workspace = true }
 rcgen = { workspace = true }
+rustls-test = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 time = { workspace = true }
@@ -113,7 +114,7 @@ path = "tests/runners/unbuffered.rs"
 [package.metadata.docs.rs]
 # all non-default features except fips (cannot build on docs.rs environment)
 features = ["read_buf", "ring"]
-rustdoc-args = ["--cfg", "docsrs"]
+rustdoc-args = ["--cfg", "rustls_docsrs"]
 
 [package.metadata.cargo_check_external_types]
 allowed_external_types = [
@@ -126,4 +127,9 @@ allowed_external_types = [
 enum_no_repr_variant_discriminant_changed = "warn"
 
 [lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ["cfg(bench)", "cfg(coverage_nightly)", "cfg(read_buf)"] }
+unexpected_cfgs = { level = "warn", check-cfg = [
+  "cfg(bench)",
+  "cfg(coverage_nightly)",
+  "cfg(read_buf)",
+  "cfg(rustls_docsrs)",
+] }

@@ -18,6 +18,7 @@ use core::marker::PhantomData;
 
 use crate::{Error, error::DerTypeId};
 
+/// Iterator to parse a sequence of DER-encoded values of type `T`.
 #[derive(Debug)]
 pub struct DerIterator<'a, T> {
     reader: untrusted::Reader<'a>,
@@ -311,9 +312,13 @@ pub(crate) fn nested_of_mut<'a>(
     outer_tag: Tag,
     inner_tag: Tag,
     error: Error,
+    allow_empty: bool,
     mut decoder: impl FnMut(&mut untrusted::Reader<'a>) -> Result<(), Error>,
 ) -> Result<(), Error> {
     nested(input, outer_tag, error.clone(), |outer| {
+        if allow_empty && outer.at_end() {
+            return Ok(());
+        }
         loop {
             nested(outer, inner_tag, error.clone(), |inner| decoder(inner))?;
             if outer.at_end() {

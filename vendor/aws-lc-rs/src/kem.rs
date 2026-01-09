@@ -252,11 +252,11 @@ where
 
         if 1 != unsafe {
             EVP_PKEY_decapsulate(
-                *ctx.as_mut(),
+                ctx.as_mut_ptr(),
                 shared_secret.as_mut_ptr(),
                 &mut shared_secret_len,
                 // AWS-LC incorrectly has this as an unqualified `uint8_t *`, it should be qualified with const
-                ciphertext.as_ptr() as *mut u8,
+                ciphertext.as_ptr().cast_mut(),
                 ciphertext.len(),
             )
         } {
@@ -326,7 +326,7 @@ where
 
         if 1 != unsafe {
             EVP_PKEY_encapsulate(
-                *ctx.as_mut(),
+                ctx.as_mut_ptr(),
                 ciphertext.as_mut_ptr(),
                 &mut ciphertext_len,
                 shared_secret.as_mut_ptr(),
@@ -360,6 +360,7 @@ where
         let mut encapsulate_bytes = vec![0u8; self.algorithm.encapsulate_key_size()];
         let encapsulate_key_size = self
             .evp_pkey
+            .as_const()
             .marshal_raw_public_to_buffer(&mut encapsulate_bytes)?;
 
         debug_assert_eq!(encapsulate_key_size, encapsulate_bytes.len());

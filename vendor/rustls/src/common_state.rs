@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use pki_types::CertificateDer;
 
+use crate::conn::kernel::KernelState;
 use crate::crypto::SupportedKxGroup;
 use crate::enums::{AlertDescription, ContentType, HandshakeType, ProtocolVersion};
 use crate::error::{Error, InvalidMessage, PeerMisbehaved};
@@ -13,7 +14,7 @@ use crate::msgs::base::Payload;
 use crate::msgs::codec::Codec;
 use crate::msgs::enums::{AlertLevel, KeyUpdateRequest};
 use crate::msgs::fragmenter::MessageFragmenter;
-use crate::msgs::handshake::{CertificateChain, HandshakeMessagePayload};
+use crate::msgs::handshake::{CertificateChain, HandshakeMessagePayload, ProtocolName};
 use crate::msgs::message::{
     Message, MessagePayload, OutboundChunks, OutboundOpaqueMessage, OutboundPlainMessage,
     PlainMessage,
@@ -34,7 +35,7 @@ pub struct CommonState {
     pub(crate) record_layer: record_layer::RecordLayer,
     pub(crate) suite: Option<SupportedCipherSuite>,
     pub(crate) kx_state: KxState,
-    pub(crate) alpn_protocol: Option<Vec<u8>>,
+    pub(crate) alpn_protocol: Option<ProtocolName>,
     pub(crate) aligned_handshake: bool,
     pub(crate) may_send_application_data: bool,
     pub(crate) may_receive_application_data: bool,
@@ -59,6 +60,7 @@ pub struct CommonState {
     temper_counters: TemperCounters,
     pub(crate) refresh_traffic_keys_pending: bool,
     pub(crate) fips: bool,
+    pub(crate) tls13_tickets_received: u32,
 }
 
 impl CommonState {
@@ -91,6 +93,7 @@ impl CommonState {
             temper_counters: TemperCounters::default(),
             refresh_traffic_keys_pending: false,
             fips: false,
+            tls13_tickets_received: 0,
         }
     }
 
@@ -478,6 +481,7 @@ impl CommonState {
     }
 
     pub(crate) fn take_received_plaintext(&mut self, bytes: Payload<'_>) {
+        self.temper_counters.received_app_data();
         self.received_plaintext
             .append(bytes.into_vec());
     }
@@ -502,7 +506,7 @@ impl CommonState {
     }
 
     fn send_warning_alert(&mut self, desc: AlertDescription) {
-        warn!("Sending warning alert {:?}", desc);
+        warn!("Sending warning alert {desc:?}");
         self.send_warning_alert_no_log(desc);
     }
 
@@ -867,6 +871,10 @@ pub(crate) trait State<Data>: Send + Sync {
 
     fn handle_decrypt_error(&self) {}
 
+    fn into_external_state(self: Box<Self>) -> Result<Box<dyn KernelState + 'static>, Error> {
+        Err(Error::HandshakeNotComplete)
+    }
+
     fn into_owned(self: Box<Self>) -> Box<dyn State<Data> + 'static>;
 }
 
@@ -957,6 +965,14 @@ impl TemperCounters {
             }
         }
     }
+
+    fn received_app_data(&mut self) {
+        self.allowed_key_update_requests = Self::INITIAL_KEY_UPDATE_REQUESTS;
+    }
+
+    // cf. BoringSSL `kMaxKeyUpdates`
+    // <https://github.com/google/boringssl/blob/dec5989b793c56ad4dd32173bd2d8595ca78b398/ssl/tls13_both.cc#L35-L38>
+    const INITIAL_KEY_UPDATE_REQUESTS: u8 = 32;
 }
 
 impl Default for TemperCounters {
@@ -970,9 +986,7 @@ impl Default for TemperCounters {
             // a second request after this is fatal.
             allowed_renegotiation_requests: 1,
 
-            // cf. BoringSSL `kMaxKeyUpdates`
-            // <https://github.com/google/boringssl/blob/dec5989b793c56ad4dd32173bd2d8595ca78b398/ssl/tls13_both.cc#L35-L38>
-            allowed_key_update_requests: 32,
+            allowed_key_update_requests: Self::INITIAL_KEY_UPDATE_REQUESTS,
 
             // At most two CCS are allowed: one after each ClientHello (recall a second
             // ClientHello happens after a HelloRetryRequest).

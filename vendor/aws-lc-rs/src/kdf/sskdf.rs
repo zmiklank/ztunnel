@@ -100,7 +100,7 @@ impl SskdfHmacAlgorithm {
     }
 
     #[must_use]
-    fn get_evp_md(&self) -> ConstPointer<EVP_MD> {
+    fn get_evp_md(&self) -> ConstPointer<'_, EVP_MD> {
         match_digest_type(match self.id {
             SskdfHmacAlgorithmId::Sha224 => &AlgorithmID::SHA224,
             SskdfHmacAlgorithmId::Sha256 => &AlgorithmID::SHA256,
@@ -137,7 +137,7 @@ impl SskdfDigestAlgorithm {
     }
 
     #[must_use]
-    fn get_evp_md(&self) -> ConstPointer<EVP_MD> {
+    fn get_evp_md(&self) -> ConstPointer<'_, EVP_MD> {
         match_digest_type(match self.id {
             SskdfDigestAlgorithmId::Sha224 => &AlgorithmID::SHA224,
             SskdfDigestAlgorithmId::Sha256 => &AlgorithmID::SHA256,
@@ -229,7 +229,7 @@ pub fn sskdf_hmac(
         SSKDF_hmac(
             output.as_mut_ptr(),
             out_len,
-            *evp_md,
+            evp_md.as_const_ptr(),
             secret.as_ptr(),
             secret.len(),
             info.as_ptr(),
@@ -274,7 +274,7 @@ pub fn sskdf_digest(
         SSKDF_digest(
             output.as_mut_ptr(),
             out_len,
-            *evp_md,
+            evp_md.as_const_ptr(),
             secret.as_ptr(),
             secret.len(),
             info.as_ptr(),

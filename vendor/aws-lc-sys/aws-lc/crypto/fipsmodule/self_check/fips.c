@@ -19,6 +19,8 @@
 #include "../../internal.h"
 #include "../delocate.h"
 
+#include "../rand/entropy/internal.h"
+
 
 int FIPS_mode(void) {
 #if defined(BORINGSSL_FIPS) && !defined(OPENSSL_ASAN)
@@ -29,11 +31,10 @@ int FIPS_mode(void) {
 }
 
 int FIPS_is_entropy_cpu_jitter(void) {
-#if defined(FIPS_ENTROPY_SOURCE_JITTER_CPU)
+  if (OPT_OUT_CPU_JITTER_ENTROPY_SOURCE == get_entropy_source_method_id_FOR_TESTING()) {
+    return 0;
+  }
   return 1;
-#else
-  return 0;
-#endif
 }
 
 int FIPS_mode_set(int on) { return on == FIPS_mode(); }

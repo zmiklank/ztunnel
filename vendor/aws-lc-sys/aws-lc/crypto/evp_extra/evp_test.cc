@@ -191,6 +191,17 @@ static bool ImportKey(FileTest *t, KeyMap *key_map,
   }
   EXPECT_EQ(GetKeyType(t, key_type), EVP_PKEY_id(pkey.get()));
 
+  if (EVP_PKEY_id(pkey.get()) == EVP_PKEY_EC) {
+    EC_KEY *ec_key = EVP_PKEY_get0_EC_KEY(pkey.get());
+    OPENSSL_BEGIN_ALLOW_DEPRECATED
+    if (t->HasAttribute("ExpectFromExplicitParams")) {
+      EXPECT_EQ(1, EC_KEY_decoded_from_explicit_params(ec_key));
+    } else {
+      EXPECT_EQ(0, EC_KEY_decoded_from_explicit_params(ec_key));
+    }
+    OPENSSL_END_ALLOW_DEPRECATED
+  }
+
   // The key must re-encode correctly.
   bssl::ScopedCBB cbb;
   uint8_t *der;
@@ -1313,14 +1324,14 @@ TEST(EVPTest, ECTLSEncodedPoint) {
       p224_test_data, p256_test_data, p384_test_data, p521_test_data};
 
     uint8_t *output = nullptr;
-    size_t output_size = 0;
     uint8_t *shared_secret = nullptr;
-    size_t shared_secret_size = 0;
     EVP_PKEY_CTX *pkey_ctx = nullptr;
     EVP_PKEY *pkey_public = nullptr;
     EVP_PKEY *pkey_private = nullptr;
 
     for (ectlsencodedpoint_test_data test_data : test_data_all) {
+      size_t output_size = 0;
+      size_t shared_secret_size = 0;
 
       pkey_private = instantiate_and_set_private_key(test_data.private_key,
         test_data.private_key_size, test_data.key_type, test_data.curve_nid);
@@ -1360,8 +1371,6 @@ TEST(EVPTest, ECTLSEncodedPoint) {
       EVP_PKEY_CTX_free(pkey_ctx);
       EVP_PKEY_free(pkey_public);
       EVP_PKEY_free(pkey_private);
-      output_size = 0;
-      shared_secret_size = 0;
     }
 
     // Above tests explore the happy path. Now test that some invalid
@@ -1468,6 +1477,20 @@ TEST(EVPTest, ECTLSEncodedPoint) {
     EXPECT_EQ(ERR_R_EVP_LIB,
       ERR_GET_REASON(ERR_peek_last_error()));
     ERR_clear_error();
+}
+
+TEST(EVPTest, PKEY_set_type_str) {
+  bssl::UniquePtr<EVP_PKEY> pkey(EVP_PKEY_new());
+  /* Test case 1: Assign RSA algorithm */
+  ASSERT_TRUE(EVP_PKEY_set_type_str(pkey.get(), "RSA", 3));
+  ASSERT_EQ(pkey->type, EVP_PKEY_RSA);
+
+  /* Test case 2: Assign EC algorithm */
+  ASSERT_TRUE(EVP_PKEY_set_type_str(pkey.get(), "EC", 2));
+  ASSERT_EQ(pkey->type, EVP_PKEY_EC);
+
+  /* Test case 3: Assign non-existent algorithm */
+  ASSERT_FALSE(EVP_PKEY_set_type_str(pkey.get(), "Nonsense", 8));
 }
 
 TEST(EVPTest, PKEY_asn1_find) {

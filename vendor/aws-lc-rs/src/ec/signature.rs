@@ -6,6 +6,7 @@ use crate::aws_lc::{
     NID_secp384r1, NID_secp521r1, BIGNUM, ECDSA_SIG, EVP_PKEY,
 };
 
+use crate::digest::Digest;
 use crate::ec::compressed_public_key_size_bytes;
 use crate::ec::encoding::parse_ec_public_key;
 use crate::ec::encoding::sec1::marshal_sec1_public_point;
@@ -15,7 +16,7 @@ use crate::encoding::{
 use crate::error::Unspecified;
 use crate::evp_pkey::No_EVP_PKEY_CTX_consumer;
 use crate::ptr::{DetachableLcPtr, LcPtr};
-use crate::signature::VerificationAlgorithm;
+use crate::signature::{ParsedPublicKey, ParsedVerificationAlgorithm, VerificationAlgorithm};
 use crate::{digest, sealed};
 use core::fmt;
 use core::fmt::{Debug, Formatter};
@@ -121,7 +122,7 @@ impl AsDer<PublicKeyX509Der<'static>> for PublicKey {
     /// # Errors
     /// Returns an error if the public key fails to marshal to X.509.
     fn as_der(&self) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-        let der = self.evp_pkey.marshal_rfc5280_public_key()?;
+        let der = self.evp_pkey.as_const().marshal_rfc5280_public_key()?;
         Ok(PublicKeyX509Der::new(der))
     }
 }
@@ -193,46 +194,121 @@ impl VerificationAlgorithm for EcdsaVerificationAlgorithm {
         msg: &[u8],
         signature: &[u8],
     ) -> Result<(), Unspecified> {
+        let public_key = parse_ec_public_key(public_key, self.id.nid())?;
+        self.verify_ecdsa(msg, signature, &public_key)
+    }
+
+    fn verify_digest_sig(
+        &self,
+        public_key: &[u8],
+        digest: &digest::Digest,
+        signature: &[u8],
+    ) -> Result<(), Unspecified> {
+        let public_key = parse_ec_public_key(public_key, self.id.nid())?;
+
+        self.verify_digest_ecdsa(digest, signature, &public_key)
+    }
+}
+
+impl EcdsaVerificationAlgorithm {
+    fn verify_ecdsa(
+        &self,
+        msg: &[u8],
+        signature: &[u8],
+        public_key: &LcPtr<EVP_PKEY>,
+    ) -> Result<(), Unspecified> {
         match self.sig_format {
             EcdsaSignatureFormat::ASN1 => {
-                verify_asn1_signature(self.id, self.digest, public_key, msg, signature)
+                verify_asn1_signature(self.digest, public_key, msg, signature)
             }
             EcdsaSignatureFormat::Fixed => {
-                verify_fixed_signature(self.id, self.digest, public_key, msg, signature)
+                let (out_bytes, out_bytes_len) = convert_fixed_signature(self.id, signature)?;
+                verify_asn1_signature(self.digest, public_key, msg, unsafe {
+                    out_bytes.as_slice(out_bytes_len)
+                })
+            }
+        }
+    }
+
+    fn verify_digest_ecdsa(
+        &self,
+        digest: &Digest,
+        signature: &[u8],
+        public_key: &LcPtr<EVP_PKEY>,
+    ) -> Result<(), Unspecified> {
+        if self.digest != digest.algorithm() {
+            return Err(Unspecified);
+        }
+        match self.sig_format {
+            EcdsaSignatureFormat::ASN1 => {
+                verify_asn1_digest_signature(digest, public_key, signature)
+            }
+            EcdsaSignatureFormat::Fixed => {
+                let (out_bytes, out_bytes_len) = convert_fixed_signature(self.id, signature)?;
+                verify_asn1_digest_signature(digest, public_key, unsafe {
+                    out_bytes.as_slice(out_bytes_len)
+                })
             }
         }
     }
 }
 
-fn verify_fixed_signature(
+impl ParsedVerificationAlgorithm for EcdsaVerificationAlgorithm {
+    fn parsed_verify_sig(
+        &self,
+        public_key: &ParsedPublicKey,
+        msg: &[u8],
+        signature: &[u8],
+    ) -> Result<(), Unspecified> {
+        self.verify_ecdsa(msg, signature, public_key.key())
+    }
+
+    fn parsed_verify_digest_sig(
+        &self,
+        public_key: &ParsedPublicKey,
+        digest: &Digest,
+        signature: &[u8],
+    ) -> Result<(), Unspecified> {
+        self.verify_digest_ecdsa(digest, signature, public_key.key())
+    }
+}
+
+fn convert_fixed_signature(
     alg: &'static AlgorithmID,
-    digest: &'static digest::Algorithm,
-    public_key: &[u8],
-    msg: &[u8],
     signature: &[u8],
-) -> Result<(), Unspecified> {
+) -> Result<(LcPtr<u8>, usize), Unspecified> {
     let mut out_bytes = null_mut::<u8>();
     let mut out_bytes_len = MaybeUninit::<usize>::uninit();
     let sig = unsafe { ecdsa_sig_from_fixed(alg, signature)? };
     if 1 != unsafe {
-        ECDSA_SIG_to_bytes(&mut out_bytes, out_bytes_len.as_mut_ptr(), *sig.as_const())
+        ECDSA_SIG_to_bytes(
+            &mut out_bytes,
+            out_bytes_len.as_mut_ptr(),
+            sig.as_const_ptr(),
+        )
     } {
         return Err(Unspecified);
     }
-    let out_bytes = LcPtr::new(out_bytes)?;
-    let signature = unsafe { out_bytes.as_slice(out_bytes_len.assume_init()) };
-    verify_asn1_signature(alg, digest, public_key, msg, signature)
+    Ok((LcPtr::new(out_bytes)?, unsafe {
+        out_bytes_len.assume_init()
+    }))
 }
 
 fn verify_asn1_signature(
-    alg: &'static AlgorithmID,
-    digest: &'static digest::Algorithm,
-    public_key: &[u8],
+    digest_alg: &'static digest::Algorithm,
+    public_key: &LcPtr<EVP_PKEY>,
     msg: &[u8],
     signature: &[u8],
 ) -> Result<(), Unspecified> {
-    let evp_pkey = parse_ec_public_key(public_key, alg.nid())?;
-    evp_pkey.verify(msg, Some(digest), No_EVP_PKEY_CTX_consumer, signature)
+    public_key.verify(msg, Some(digest_alg), No_EVP_PKEY_CTX_consumer, signature)
+}
+
+fn verify_asn1_digest_signature(
+    digest: &Digest,
+    public_key: &LcPtr<EVP_PKEY>,
+    signature: &[u8],
+) -> Result<(), Unspecified> {
+    public_key.verify_digest_sig(digest, No_EVP_PKEY_CTX_consumer, signature)
 }
 
 #[inline]
@@ -249,7 +325,7 @@ unsafe fn ecdsa_sig_from_fixed(
 
     let mut ecdsa_sig = LcPtr::new(ECDSA_SIG_new())?;
 
-    if 1 != ECDSA_SIG_set0(*ecdsa_sig.as_mut(), *r_bn.as_mut(), *s_bn.as_mut()) {
+    if 1 != ECDSA_SIG_set0(ecdsa_sig.as_mut_ptr(), r_bn.as_mut_ptr(), s_bn.as_mut_ptr()) {
         return Err(());
     }
     r_bn.detach();

@@ -34,14 +34,14 @@
 #elif defined(__ARMEL__) || defined(_M_ARM)
 #define OPENSSL_32_BIT
 #define OPENSSL_ARM
-#elif (defined(__PPC64__) || defined(__powerpc64__)) && defined(_LITTLE_ENDIAN)
+#elif (defined(__PPC64__) || defined(__powerpc64__)) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 #define OPENSSL_64_BIT
 #define OPENSSL_PPC64LE
-#elif (defined(__PPC64__) || defined(__powerpc64__)) && defined(_BIG_ENDIAN)
+#elif (defined(__PPC64__) || defined(__powerpc64__)) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define OPENSSL_64_BIT
 #define OPENSSL_PPC64BE
 #define OPENSSL_BIG_ENDIAN
-#elif (defined(__PPC__) || defined(__powerpc__)) && defined(_BIG_ENDIAN)
+#elif (defined(__PPC__) || defined(__powerpc__)) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define OPENSSL_32_BIT
 #define OPENSSL_PPC32BE
 #define OPENSSL_BIG_ENDIAN
@@ -49,7 +49,7 @@
 #define OPENSSL_64_BIT
 #define OPENSSL_S390X
 #define OPENSSL_BIG_ENDIAN
-#elif defined(__sparc__) && defined(_BIG_ENDIAN)
+#elif defined(__sparc__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
 #define OPENSSL_64_BIT
 #define OPENSSL_SPARCV9
 #define OPENSSL_BIG_ENDIAN
@@ -88,6 +88,14 @@
 
 #if defined(__APPLE__)
 #define OPENSSL_APPLE
+// Note |TARGET_OS_MAC| is set for all Apple OS variants. |TARGET_OS_OSX|
+// targets macOS specifically.
+#if defined(TARGET_OS_OSX) && TARGET_OS_OSX
+#define OPENSSL_MACOS
+#endif
+#if defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
+#define OPENSSL_IOS
+#endif
 #endif
 
 #if defined(_WIN32)
@@ -164,6 +172,14 @@
 
 #if defined(__OpenBSD__)
 #define OPENSSL_OPENBSD
+#endif
+
+#if defined(__NetBSD__)
+#define OPENSSL_NETBSD
+#endif
+
+#if defined(__illumos__) || (defined(__sun) && defined(__SVR4))
+#define OPENSSL_SOLARIS
 #endif
 
 // BoringSSL requires platform's locking APIs to make internal global state

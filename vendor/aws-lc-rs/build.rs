@@ -10,6 +10,7 @@ fn main() {
         "`fips` and `non-fips` are mutually exclusive crate features."
     );
 
+    println!("cargo:rustc-check-cfg=cfg(aws_lc_rs_docsrs)");
     println!("cargo:rustc-check-cfg=cfg(disable_slow_tests)");
     if let Ok(disable) = env::var("AWS_LC_RS_DISABLE_SLOW_TESTS") {
         if disable == "1" {
@@ -33,6 +34,18 @@ fn main() {
             "one of the following features must be specified: `aws-lc-sys`, `non-fips`, or `fips`."
         );
     };
+
+    // When using static CRT on Windows MSVC, ignore missing PDB file warnings
+    // The static CRT libraries reference PDB files from Microsoft's build servers
+    // which are not available during linking
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+        && env::var("CARGO_CFG_TARGET_FEATURE")
+            .map(|features| features.contains("crt-static"))
+            .unwrap_or(false)
+    {
+        println!("cargo:rustc-link-arg=/ignore:4099");
+    }
 
     export_sys_vars(sys_crate);
 }

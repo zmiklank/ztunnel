@@ -21,7 +21,11 @@ pub(in crate::rsa) mod rfc8017 {
         let mut pubkey_bytes = null_mut::<u8>();
         let mut outlen: usize = 0;
         if 1 != unsafe {
-            RSA_public_key_to_bytes(&mut pubkey_bytes, &mut outlen, *pubkey.get_rsa()?)
+            RSA_public_key_to_bytes(
+                &mut pubkey_bytes,
+                &mut outlen,
+                pubkey.as_const().get_rsa()?.as_const_ptr(),
+            )
         } {
             return Err(Unspecified);
         }
@@ -36,13 +40,13 @@ pub(in crate::rsa) mod rfc8017 {
     pub(in crate::rsa) fn decode_public_key_der(
         public_key: &[u8],
     ) -> Result<LcPtr<EVP_PKEY>, KeyRejected> {
-        let rsa = DetachableLcPtr::new(unsafe {
+        let mut rsa = DetachableLcPtr::new(unsafe {
             RSA_public_key_from_bytes(public_key.as_ptr(), public_key.len())
         })?;
 
         let mut pkey = LcPtr::new(unsafe { EVP_PKEY_new() })?;
 
-        if 1 != unsafe { EVP_PKEY_assign_RSA(*pkey.as_mut(), *rsa) } {
+        if 1 != unsafe { EVP_PKEY_assign_RSA(pkey.as_mut_ptr(), rsa.as_mut_ptr()) } {
             return Err(KeyRejected::unspecified());
         }
 
@@ -58,11 +62,11 @@ pub(in crate::rsa) mod rfc8017 {
     ) -> Result<LcPtr<EVP_PKEY>, KeyRejected> {
         let mut cbs = cbs::build_CBS(private_key);
 
-        let rsa = DetachableLcPtr::new(unsafe { RSA_parse_private_key(&mut cbs) })?;
+        let mut rsa = DetachableLcPtr::new(unsafe { RSA_parse_private_key(&mut cbs) })?;
 
         let mut pkey = LcPtr::new(unsafe { EVP_PKEY_new() })?;
 
-        if 1 != unsafe { EVP_PKEY_assign_RSA(*pkey.as_mut(), *rsa) } {
+        if 1 != unsafe { EVP_PKEY_assign_RSA(pkey.as_mut_ptr(), rsa.as_mut_ptr()) } {
             return Err(KeyRejected::unspecified());
         }
 
@@ -85,7 +89,7 @@ pub(in crate::rsa) mod rfc5280 {
     pub(in crate::rsa) fn encode_public_key_der(
         key: &LcPtr<EVP_PKEY>,
     ) -> Result<PublicKeyX509Der<'static>, Unspecified> {
-        let der = key.marshal_rfc5280_public_key()?;
+        let der = key.as_const().marshal_rfc5280_public_key()?;
         Ok(PublicKeyX509Der::from(Buffer::new(der)))
     }
 

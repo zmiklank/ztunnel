@@ -56,15 +56,18 @@
 //!
 //! The community has also started developing third-party providers for Rustls:
 //!
-//!   * [`rustls-mbedtls-provider`] - a provider that uses [`mbedtls`] for cryptography.
-//!   * [`rustls-openssl`] - a provider that uses [OpenSSL] for cryptography.
 //!   * [`boring-rustls-provider`] - a work-in-progress provider that uses [`boringssl`] for
 //!     cryptography.
+//!   * [`rustls-graviola`] - a provider that uses [`graviola`] for cryptography.
+//!   * [`rustls-mbedtls-provider`] - a provider that uses [`mbedtls`] for cryptography.
+//!   * [`rustls-openssl`] - a provider that uses [OpenSSL] for cryptography.
 //!   * [`rustls-rustcrypto`] - an experimental provider that uses the crypto primitives
 //!     from [`RustCrypto`] for cryptography.
 //!   * [`rustls-symcrypt`] - a provider that uses Microsoft's [SymCrypt] library.
 //!   * [`rustls-wolfcrypt-provider`] - a work-in-progress provider that uses [`wolfCrypt`] for cryptography.
 //!
+//! [`rustls-graviola`]: https://crates.io/crates/rustls-graviola
+//! [`graviola`]: https://github.com/ctz/graviola
 //! [`rustls-mbedtls-provider`]: https://github.com/fortanix/rustls-mbedtls-provider
 //! [`mbedtls`]: https://github.com/Mbed-TLS/mbedtls
 //! [`rustls-openssl`]: https://github.com/tofay/rustls-openssl
@@ -296,11 +299,10 @@
 //!
 //!   See [manual::_06_fips] for more details.
 //!
-//! - `prefer-post-quantum`: for the [`aws-lc-rs`]-backed provider, prioritizes post-quantum secure
-//!   key exchange by default (using X25519MLKEM768).  This feature merely alters the order
-//!   of `rustls::crypto::aws_lc_rs::DEFAULT_KX_GROUPS`.  We expect to add this feature
-//!   to the default set in a future minor release.  See [the manual][x25519mlkem768-manual]
-//!   for more details.
+//! - `prefer-post-quantum` (enabled by default): for the [`aws-lc-rs`]-backed provider,
+//!   prioritizes post-quantum secure key exchange by default (using X25519MLKEM768).
+//!   This feature merely alters the order of `rustls::crypto::aws_lc_rs::DEFAULT_KX_GROUPS`.
+//!   See [the manual][x25519mlkem768-manual] for more details.
 //!
 //! - `custom-provider`: disables implicit use of built-in providers (`aws-lc-rs` or `ring`). This forces
 //!   applications to manually install one, for instance, when using a custom `CryptoProvider`.
@@ -331,7 +333,6 @@
 #![cfg_attr(not(any(read_buf, bench, coverage_nightly)), forbid(unstable_features))]
 #![warn(
     clippy::alloc_instead_of_core,
-    clippy::clone_on_ref_ptr,
     clippy::manual_let_else,
     clippy::std_instead_of_core,
     clippy::use_self,
@@ -363,7 +364,7 @@
     clippy::new_without_default
 )]
 // Enable documentation for all features on docs.rs
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(rustls_docsrs, feature(doc_cfg))]
 // Enable coverage() attr for nightly coverage builds, see
 // <https://github.com/rust-lang/rust/issues/84605>
 // (`coverage_nightly` is a cfg set by `cargo-llvm-cov`)
@@ -476,8 +477,7 @@ pub mod internal {
         }
         pub mod enums {
             pub use crate::msgs::enums::{
-                AlertLevel, CertificateType, Compression, EchVersion, ExtensionType, HpkeAead,
-                HpkeKdf, HpkeKem, NamedGroup,
+                AlertLevel, EchVersion, ExtensionType, HpkeAead, HpkeKdf, HpkeKem,
             };
         }
         pub mod fragmenter {
@@ -485,10 +485,7 @@ pub mod internal {
         }
         pub mod handshake {
             pub use crate::msgs::handshake::{
-                CertificateChain, ClientExtension, ClientHelloPayload, DistinguishedName,
-                EchConfigContents, EchConfigPayload, HandshakeMessagePayload, HandshakePayload,
-                HpkeKeyConfig, HpkeSymmetricCipherSuite, KeyShareEntry, Random, ServerExtension,
-                ServerName, SessionId,
+                EchConfigContents, EchConfigPayload, HpkeKeyConfig, HpkeSymmetricCipherSuite,
             };
         }
         pub mod message {
@@ -548,14 +545,15 @@ pub use crate::builder::{ConfigBuilder, ConfigSide, WantsVerifier, WantsVersions
 pub use crate::common_state::{CommonState, HandshakeKind, IoState, Side};
 #[cfg(feature = "std")]
 pub use crate::conn::{Connection, Reader, Writer};
-pub use crate::conn::{ConnectionCommon, SideData};
+pub use crate::conn::{ConnectionCommon, SideData, kernel};
 pub use crate::enums::{
     AlertDescription, CertificateCompressionAlgorithm, CipherSuite, ContentType, HandshakeType,
     ProtocolVersion, SignatureAlgorithm, SignatureScheme,
 };
 pub use crate::error::{
-    CertRevocationListError, CertificateError, EncryptedClientHelloError, Error, InconsistentKeys,
-    InvalidMessage, OtherError, PeerIncompatible, PeerMisbehaved,
+    CertRevocationListError, CertificateError, EncryptedClientHelloError, Error,
+    ExtendedKeyPurpose, InconsistentKeys, InvalidMessage, OtherError, PeerIncompatible,
+    PeerMisbehaved,
 };
 pub use crate::key_log::{KeyLog, NoKeyLog};
 #[cfg(feature = "std")]
@@ -587,6 +585,8 @@ pub mod client {
     mod ech;
     pub(super) mod handy;
     mod hs;
+    #[cfg(test)]
+    mod test;
     #[cfg(feature = "tls12")]
     mod tls12;
     mod tls13;
@@ -628,6 +628,8 @@ pub mod server {
     pub(crate) mod handy;
     mod hs;
     mod server_conn;
+    #[cfg(test)]
+    mod test;
     #[cfg(feature = "tls12")]
     mod tls12;
     mod tls13;
@@ -645,6 +647,7 @@ pub mod server {
     #[cfg(feature = "std")]
     pub use server_conn::{AcceptedAlert, Acceptor, ReadEarlyData, ServerConnection};
 
+    pub use crate::enums::CertificateType;
     pub use crate::verify::NoClientAuth;
     pub use crate::webpki::{
         ClientCertVerifierBuilder, ParsedCertificate, VerifierBuilderError, WebPkiClientVerifier,
@@ -677,7 +680,9 @@ pub mod pki_types {
 
 /// Message signing interfaces.
 pub mod sign {
-    pub use crate::crypto::signer::{CertifiedKey, Signer, SigningKey, SingleCertAndKey};
+    pub use crate::crypto::signer::{
+        CertifiedKey, Signer, SigningKey, SingleCertAndKey, public_key_to_spki,
+    };
 }
 
 /// APIs for implementing QUIC TLS

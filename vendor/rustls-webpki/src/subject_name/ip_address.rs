@@ -564,7 +564,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, feature = "alloc"))]
+#[cfg(all(test, feature = "std"))]
 mod alloc_tests {
     use super::*;
 
@@ -672,7 +672,6 @@ mod alloc_tests {
         ("1003:fca::", "2001:db8::", "0000:0000::", Ok(true)),
     ];
 
-    #[cfg(feature = "std")]
     #[test]
     fn presented_matches_constraint_test() {
         use std::boxed::Box;
@@ -700,8 +699,7 @@ mod alloc_tests {
             );
             assert_eq!(
                 &actual_result, expected_result,
-                "presented_id_matches_constraint(\"{:?}\", \"{:?}\")",
-                presented_bytes, constraint_bytes
+                "presented_id_matches_constraint(\"{presented_bytes:?}\", \"{constraint_bytes:?}\")"
             );
         }
     }

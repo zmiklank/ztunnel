@@ -51,6 +51,7 @@ impl AsDer<Pkcs8V1Der<'static>> for PqdsaPrivateKey<'_> {
         Ok(Pkcs8V1Der::new(
             self.0
                 .evp_pkey
+                .as_const()
                 .marshal_rfc5208_private_key(pkcs8::Version::V1)?,
         ))
     }
@@ -59,7 +60,7 @@ impl AsDer<Pkcs8V1Der<'static>> for PqdsaPrivateKey<'_> {
 impl AsRawBytes<PqdsaPrivateKeyRaw<'static>> for PqdsaPrivateKey<'_> {
     fn as_raw_bytes(&self) -> Result<PqdsaPrivateKeyRaw<'static>, Unspecified> {
         Ok(PqdsaPrivateKeyRaw::new(
-            self.0.evp_pkey.marshal_raw_private_key()?,
+            self.0.evp_pkey.as_const().marshal_raw_private_key()?,
         ))
     }
 }
@@ -121,7 +122,9 @@ impl PqdsaKeyPair {
     /// Returns `Unspecified` if serialization fails.
     pub fn to_pkcs8(&self) -> Result<Document, Unspecified> {
         Ok(Document::new(
-            self.evp_pkey.marshal_rfc5208_private_key(Version::V1)?,
+            self.evp_pkey
+                .as_const()
+                .marshal_rfc5208_private_key(Version::V1)?,
         ))
     }
 
@@ -148,7 +151,7 @@ impl PqdsaKeyPair {
 
     /// Returns the private key associated with this key pair.
     #[must_use]
-    pub fn private_key(&self) -> PqdsaPrivateKey {
+    pub fn private_key(&self) -> PqdsaPrivateKey<'_> {
         PqdsaPrivateKey(self)
     }
 }
@@ -172,11 +175,11 @@ pub(crate) fn evp_key_pqdsa_generate(nid: c_int) -> Result<LcPtr<EVP_PKEY>, Unsp
 mod tests {
     use super::*;
 
-    use crate::signature::{UnparsedPublicKey, VerificationAlgorithm};
-    use crate::unstable::signature::{MLDSA_44_SIGNING, MLDSA_65_SIGNING, MLDSA_87_SIGNING};
+    use crate::signature::UnparsedPublicKey;
+    use crate::unstable::signature::{ML_DSA_44_SIGNING, ML_DSA_65_SIGNING, ML_DSA_87_SIGNING};
 
     const TEST_ALGORITHMS: &[&PqdsaSigningAlgorithm] =
-        &[&MLDSA_44_SIGNING, &MLDSA_65_SIGNING, &MLDSA_87_SIGNING];
+        &[&ML_DSA_44_SIGNING, &ML_DSA_65_SIGNING, &ML_DSA_87_SIGNING];
 
     #[test]
     fn test_public_key_serialization() {
@@ -216,6 +219,7 @@ mod tests {
             #[cfg(feature = "ring-sig-verify")]
             #[allow(deprecated)]
             {
+                use crate::signature::VerificationAlgorithm;
                 assert!(alg
                     .0
                     .verify(

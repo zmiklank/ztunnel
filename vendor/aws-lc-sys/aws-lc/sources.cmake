@@ -241,6 +241,9 @@ set(
   crypto/x509/test/basic_constraints_ca_pathlen_10.pem
   crypto/x509/test/basic_constraints_leaf.pem
   crypto/x509/test/basic_constraints_none.pem
+  crypto/x509/test/csr-mldsa44.pem
+  crypto/x509/test/csr-mldsa65.pem
+  crypto/x509/test/csr-mldsa87.pem
   crypto/x509/test/invalid_extension_intermediate.pem
   crypto/x509/test/invalid_extension_intermediate_authority_key_identifier.pem
   crypto/x509/test/invalid_extension_intermediate_basic_constraints.pem
@@ -269,11 +272,11 @@ set(
   crypto/x509/test/many_names1.pem
   crypto/x509/test/many_names2.pem
   crypto/x509/test/many_names3.pem
-  crypto/x509/test/policy_root.pem
+  crypto/x509/test/policy_intermediate.pem
   crypto/x509/test/policy_intermediate_duplicate.pem
   crypto/x509/test/policy_intermediate_invalid.pem
-  crypto/x509/test/policy_intermediate.pem
   crypto/x509/test/policy_leaf_duplicate.pem
+  crypto/x509/test/policy_root.pem
   crypto/x509/test/policy_leaf_invalid.pem
   crypto/x509/test/policy_leaf.pem
   crypto/x509/test/some_names1.pem
@@ -286,11 +289,11 @@ set(
   crypto/x509/test/trailing_data_leaf_name_constraints.pem
   crypto/x509/test/trailing_data_leaf_subject_alt_name.pem
   crypto/x509/test/trailing_data_leaf_subject_key_identifier.pem
+  third_party/vectors/converted/wycheproof/testvectors_v1/aes_gcm_test.txt
   third_party/wycheproof_testvectors/aes_cbc_pkcs5_test.txt
   third_party/wycheproof_testvectors/aes_ccm_test.txt
   third_party/wycheproof_testvectors/aes_cmac_test.txt
   third_party/wycheproof_testvectors/aes_gcm_siv_test.txt
-  third_party/wycheproof_testvectors/aes_gcm_test.txt
   third_party/wycheproof_testvectors/chacha20_poly1305_test.txt
   third_party/wycheproof_testvectors/dsa_test.txt
   third_party/wycheproof_testvectors/ecdh_secp224r1_test.txt
@@ -319,6 +322,10 @@ set(
   third_party/wycheproof_testvectors/hmac_sha512_test.txt
   third_party/wycheproof_testvectors/hmac_sha512_224_test.txt
   third_party/wycheproof_testvectors/hmac_sha512_256_test.txt
+  third_party/wycheproof_testvectors/hmac_sha3_224_test.txt
+  third_party/wycheproof_testvectors/hmac_sha3_256_test.txt
+  third_party/wycheproof_testvectors/hmac_sha3_384_test.txt
+  third_party/wycheproof_testvectors/hmac_sha3_512_test.txt
   third_party/wycheproof_testvectors/kwp_test.txt
   third_party/wycheproof_testvectors/kw_test.txt
   third_party/wycheproof_testvectors/primality_test.txt

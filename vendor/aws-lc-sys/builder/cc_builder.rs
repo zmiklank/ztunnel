@@ -9,25 +9,36 @@ mod aarch64_apple_darwin;
 mod aarch64_unknown_linux_gnu;
 mod aarch64_unknown_linux_musl;
 mod i686_unknown_linux_gnu;
+mod riscv64gc_unknown_linux_gnu;
 mod x86_64_apple_darwin;
 mod x86_64_unknown_linux_gnu;
 mod x86_64_unknown_linux_musl;
 
 use crate::{
-    cargo_env, effective_target, emit_warning, env_var_to_bool, execute_command, get_crate_cflags,
-    is_no_asm, option_env, out_dir, requested_c_std, target, target_arch, target_env, target_os,
-    target_vendor, CStdRequested, OutputLibType,
+    cargo_env, disable_jitter_entropy, effective_target, emit_warning, env_var_to_bool,
+    execute_command, get_crate_cflags, is_no_asm, optional_env_optional_crate_target,
+    optional_env_target, out_dir, requested_c_std, set_env_for_target, target, target_arch,
+    target_env, target_os, CStdRequested, OutputLibType,
 };
+use std::cell::Cell;
+use std::collections::HashMap;
 use std::path::PathBuf;
+
+#[non_exhaustive]
+#[derive(PartialEq, Eq)]
+pub(crate) enum CompilerFeature {
+    NeonSha3,
+}
 
 pub(crate) struct CcBuilder {
     manifest_dir: PathBuf,
     out_dir: PathBuf,
     build_prefix: Option<String>,
     output_lib_type: OutputLibType,
+    compiler_features: Cell<Vec<CompilerFeature>>,
 }
 
-use std::{env, fs};
+use std::fs;
 
 pub(crate) struct Library {
     name: &'static str,
@@ -40,6 +51,7 @@ enum PlatformConfig {
     aarch64_apple_darwin,
     aarch64_unknown_linux_gnu,
     aarch64_unknown_linux_musl,
+    riscv64gc_unknown_linux_gnu,
     x86_64_apple_darwin,
     x86_64_unknown_linux_gnu,
     x86_64_unknown_linux_musl,
@@ -54,6 +66,9 @@ impl PlatformConfig {
             PlatformConfig::aarch64_unknown_linux_musl => {
                 aarch64_unknown_linux_musl::CRYPTO_LIBRARY
             }
+            PlatformConfig::riscv64gc_unknown_linux_gnu => {
+                riscv64gc_unknown_linux_gnu::CRYPTO_LIBRARY
+            }
             PlatformConfig::x86_64_apple_darwin => x86_64_apple_darwin::CRYPTO_LIBRARY,
             PlatformConfig::x86_64_unknown_linux_gnu => x86_64_unknown_linux_gnu::CRYPTO_LIBRARY,
             PlatformConfig::x86_64_unknown_linux_musl => x86_64_unknown_linux_musl::CRYPTO_LIBRARY,
@@ -67,6 +82,7 @@ impl PlatformConfig {
             "aarch64-apple-darwin" => Some(PlatformConfig::aarch64_apple_darwin),
             "aarch64-unknown-linux-gnu" => Some(PlatformConfig::aarch64_unknown_linux_gnu),
             "aarch64-unknown-linux-musl" => Some(PlatformConfig::aarch64_unknown_linux_musl),
+            "riscv64gc-unknown-linux-gnu" => Some(PlatformConfig::riscv64gc_unknown_linux_gnu),
             "x86_64-apple-darwin" => Some(PlatformConfig::x86_64_apple_darwin),
             "x86_64-unknown-linux-gnu" => Some(PlatformConfig::x86_64_unknown_linux_gnu),
             "x86_64-unknown-linux-musl" => Some(PlatformConfig::x86_64_unknown_linux_musl),
@@ -162,6 +178,7 @@ impl CcBuilder {
             out_dir,
             build_prefix,
             output_lib_type,
+            compiler_features: Cell::new(vec![]),
         }
     }
 
@@ -184,7 +201,7 @@ impl CcBuilder {
                 build_options.push(BuildOption::std("c11"));
             }
             CStdRequested::None => {
-                if self.compiler_check("c11") {
+                if self.compiler_check("c11", Vec::<String>::new()) {
                     build_options.push(BuildOption::std("c11"));
                 } else {
                     build_options.push(BuildOption::std("c99"));
@@ -192,17 +209,22 @@ impl CcBuilder {
             }
         }
 
-        if let Some(cc) = option_env("CC") {
-            emit_warning(&format!("CC environment variable set: {}", cc.clone()));
+        if let Some(cc) = optional_env_optional_crate_target("CC") {
+            set_env_for_target("CC", &cc);
         }
-        if let Some(cxx) = option_env("CXX") {
-            emit_warning(&format!("CXX environment variable set: {}", cxx.clone()));
+        if let Some(cxx) = optional_env_optional_crate_target("CXX") {
+            set_env_for_target("CXX", &cxx);
         }
 
         if target_arch() == "x86" && !compiler_is_msvc {
             if let Some(option) = BuildOption::flag_if_supported(cc_build, "-msse2") {
                 build_options.push(option);
             }
+        }
+
+        if target_os() == "macos" || target_os() == "darwin" {
+            // Certain MacOS system headers are guarded by _POSIX_C_SOURCE and _DARWIN_C_SOURCE
+            build_options.push(BuildOption::define("_DARWIN_C_SOURCE", "1"));
         }
 
         let opt_level = cargo_env("OPT_LEVEL");
@@ -221,13 +243,13 @@ impl CcBuilder {
                 if !compiler_is_msvc {
                     let flag = format!("-ffile-prefix-map={}=", self.manifest_dir.display());
                     if let Ok(true) = cc_build.is_flag_supported(&flag) {
-                        emit_warning(&format!("Using flag: {}", &flag));
+                        emit_warning(format!("Using flag: {}", &flag));
                         build_options.push(BuildOption::flag(&flag));
                     } else {
                         emit_warning("NOTICE: Build environment source paths might be visible in release binary.");
                         let flag = format!("-fdebug-prefix-map={}=", self.manifest_dir.display());
                         if let Ok(true) = cc_build.is_flag_supported(&flag) {
-                            emit_warning(&format!("Using flag: {}", &flag));
+                            emit_warning(format!("Using flag: {}", &flag));
                             build_options.push(BuildOption::flag(&flag));
                         }
                     }
@@ -270,7 +292,9 @@ impl CcBuilder {
                 build_options.push(BuildOption::flag("-pthread"));
             }
         }
-
+        if Some(true) == disable_jitter_entropy() {
+            build_options.push(BuildOption::define("DISABLE_CPU_JITTER_ENTROPY", "1"));
+        }
         self.add_includes(&mut build_options);
 
         build_options
@@ -300,9 +324,20 @@ impl CcBuilder {
             self.manifest_dir
                 .join("aws-lc")
                 .join("third_party")
-                .join("jitterentropy")
-                .join("jitterentropy-library"),
+                .join("s2n-bignum")
+                .join("s2n-bignum-imported")
+                .join("include"),
         ));
+
+        if Some(true) != disable_jitter_entropy() {
+            build_options.push(BuildOption::include(
+                self.manifest_dir
+                    .join("aws-lc")
+                    .join("third_party")
+                    .join("jitterentropy")
+                    .join("jitterentropy-library"),
+            ));
+        }
     }
 
     pub fn create_builder(&self) -> cc::Build {
@@ -315,29 +350,106 @@ impl CcBuilder {
     }
 
     pub fn prepare_builder(&self) -> cc::Build {
+        let cflags = get_crate_cflags();
+        if !cflags.is_empty() {
+            set_env_for_target("CFLAGS", cflags);
+        }
+
         let mut cc_build = self.create_builder();
         let (_, build_options) = self.collect_universal_build_options(&cc_build);
         for option in build_options {
             option.apply_cc(&mut cc_build);
         }
-        let cflags = get_crate_cflags();
-        if !cflags.is_empty() {
-            emit_warning(&format!(
-                "AWS_LC_SYS_CFLAGS found. Setting CFLAGS: '{cflags}'"
-            ));
-            env::set_var("CFLAGS", cflags);
+
+        // Add --noexecstack flag for assembly files to prevent executable stacks
+        // This matches the behavior of AWS-LC's CMake build which uses -Wa,--noexecstack
+        // See: https://github.com/aws/aws-lc/blob/main/crypto/CMakeLists.txt#L77
+        if target_os() == "linux" || target_os().ends_with("bsd") {
+            cc_build.asm_flag("-Wa,--noexecstack");
         }
+
         cc_build
     }
 
-    fn add_all_files(&self, lib: &Library, cc_build: &mut cc::Build) -> Vec<PathBuf> {
-        use core::str::FromStr;
-        cc_build.file(PathBuf::from_str("rust_wrapper.c").unwrap());
+    #[allow(clippy::zero_sized_map_values)]
+    fn build_s2n_bignum_source_feature_map() -> HashMap<String, CompilerFeature> {
+        let mut source_feature_map: HashMap<String, CompilerFeature> = HashMap::new();
+        source_feature_map.insert("sha3_keccak_f1600_alt.S".into(), CompilerFeature::NeonSha3);
+        source_feature_map.insert("sha3_keccak2_f1600.S".into(), CompilerFeature::NeonSha3);
+        source_feature_map.insert(
+            "sha3_keccak4_f1600_alt2.S".into(),
+            CompilerFeature::NeonSha3,
+        );
+        source_feature_map
+    }
 
-        // s2n_bignum is compiled separately due to needing extra flags
+    fn prepare_jitter_entropy_builder(&self) -> cc::Build {
+        // See: https://github.com/aws/aws-lc/blob/2294510cd0ecb2d5946461e3dbb038363b7b94cb/third_party/jitterentropy/CMakeLists.txt#L19-L35
+        let mut build_options: Vec<BuildOption> = Vec::new();
+        self.add_includes(&mut build_options);
+
+        let mut je_builder = cc::Build::new();
+        for option in build_options {
+            option.apply_cc(&mut je_builder);
+        }
+
+        let compiler = if let Some(original_cflags) = optional_env_target("CFLAGS") {
+            let mut new_cflags = original_cflags.clone();
+            // The `_FORTIFY_SOURCE` macro often requires optimizations to also be enabled, so unset it.
+            new_cflags.push_str(" -O0 -Wp,-U_FORTIFY_SOURCE");
+            set_env_for_target("CFLAGS", &new_cflags);
+            // cc-rs currently prioritizes flags provided by CFLAGS over the flags provided by the build script.
+            // The environment variables used by the compiler are set when `get_compiler` is called.
+            let compiler = je_builder.get_compiler();
+            set_env_for_target("CFLAGS", &original_cflags);
+            compiler
+        } else {
+            je_builder.get_compiler()
+        };
+
+        je_builder.define("AWSLC", "1");
+        if target_os() == "macos" || target_os() == "darwin" {
+            // Certain MacOS system headers are guarded by _POSIX_C_SOURCE and _DARWIN_C_SOURCE
+            je_builder.define("_DARWIN_C_SOURCE", "1");
+        }
+        je_builder.pic(true);
+        if target_os() == "windows" && compiler.is_like_msvc() {
+            je_builder.flag("/Od").flag("/W4").flag("/DYNAMICBASE");
+        } else {
+            je_builder
+                .flag("-fwrapv")
+                .flag("--param")
+                .flag("ssp-buffer-size=4")
+                .flag("-fvisibility=hidden")
+                .flag("-Wcast-align")
+                .flag("-Wmissing-field-initializers")
+                .flag("-Wshadow")
+                .flag("-Wswitch-enum")
+                .flag("-Wextra")
+                .flag("-Wall")
+                .flag("-pedantic")
+                // Compilation will fail if optimizations are enabled.
+                .flag("-O0")
+                .flag("-fwrapv")
+                .flag("-Wconversion");
+        }
+        je_builder
+    }
+
+    fn add_all_files(&self, lib: &Library, cc_build: &mut cc::Build) {
+        use core::str::FromStr;
+        let compiler = cc_build.get_compiler();
+
+        let force_include_option = if compiler.is_like_msvc() {
+            "/FI"
+        } else {
+            "--include="
+        };
+        // s2n-bignum is compiled separately due to needing extra flags
         let mut s2n_bignum_builder = cc_build.clone();
         s2n_bignum_builder.flag(format!(
-            "--include={}",
+            "{}{}",
+            force_include_option,
             self.manifest_dir
                 .join("generated-include")
                 .join("openssl")
@@ -345,30 +457,72 @@ impl CcBuilder {
                 .display()
         ));
         s2n_bignum_builder.define("S2N_BN_HIDE_SYMBOLS", "1");
-        let cc_preprocessor = self.create_builder();
+
+        // CPU Jitter Entropy is compiled separately due to needing specific flags
+        let mut jitter_entropy_builder = self.prepare_jitter_entropy_builder();
+        jitter_entropy_builder.flag(format!(
+            "{}{}",
+            force_include_option,
+            self.manifest_dir
+                .join("generated-include")
+                .join("openssl")
+                .join("boringssl_prefix_symbols.h")
+                .display()
+        ));
+
+        let s2n_bignum_source_feature_map = Self::build_s2n_bignum_source_feature_map();
+        let compiler_features = self.compiler_features.take();
         for source in lib.sources {
             let source_path = self.manifest_dir.join("aws-lc").join(source);
             let is_s2n_bignum = std::path::Path::new(source).starts_with("third_party/s2n-bignum");
+            let is_jitter_entropy =
+                std::path::Path::new(source).starts_with("third_party/jitterentropy");
 
+            if !source_path.is_file() {
+                emit_warning(format!("Not a file: {:?}", source_path.as_os_str()));
+                continue;
+            }
             if is_s2n_bignum {
-                let asm_output_path = if target_vendor() == "apple" && target_arch() == "aarch64" {
-                    let asm_output_path = self.out_dir.join(source);
-                    let mut cc_preprocessor = cc_preprocessor.clone();
-                    cc_preprocessor.file(source_path);
-                    let preprocessed_asm = String::from_utf8(cc_preprocessor.expand()).unwrap();
-                    let preprocessed_asm = preprocessed_asm.replace(';', "\n\t");
-                    fs::create_dir_all(asm_output_path.parent().unwrap()).unwrap();
-                    fs::write(asm_output_path.clone(), preprocessed_asm).unwrap();
-                    asm_output_path
+                let filename: String = source_path
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string();
+
+                if let Some(compiler_feature) = s2n_bignum_source_feature_map.get(&filename) {
+                    if compiler_features.contains(compiler_feature) {
+                        s2n_bignum_builder.file(source_path);
+                    } else {
+                        emit_warning(format!(
+                            "Skipping due to missing compiler features: {:?}",
+                            source_path.as_os_str()
+                        ));
+                    }
                 } else {
-                    source_path.clone()
-                };
-                s2n_bignum_builder.file(asm_output_path);
+                    s2n_bignum_builder.file(source_path);
+                }
+            } else if is_jitter_entropy {
+                // Only compile if not disabled.
+                if Some(true) != disable_jitter_entropy() {
+                    jitter_entropy_builder.file(source_path);
+                }
             } else {
                 cc_build.file(source_path);
             }
         }
-        s2n_bignum_builder.compile_intermediates()
+        self.compiler_features.set(compiler_features);
+        let s2n_bignum_object_files = s2n_bignum_builder.compile_intermediates();
+        for object in s2n_bignum_object_files {
+            cc_build.object(object);
+        }
+        if Some(true) != disable_jitter_entropy() {
+            let jitter_entropy_object_files = jitter_entropy_builder.compile_intermediates();
+            for object in jitter_entropy_object_files {
+                cc_build.object(object);
+            }
+        }
+        cc_build.file(PathBuf::from_str("rust_wrapper.c").unwrap());
     }
 
     fn build_library(&self, lib: &Library) {
@@ -378,10 +532,7 @@ impl CcBuilder {
         }
         self.run_compiler_checks(&mut cc_build);
 
-        let object_files = self.add_all_files(lib, &mut cc_build);
-        for object in object_files {
-            cc_build.object(object);
-        }
+        self.add_all_files(lib, &mut cc_build);
         if let Some(prefix) = &self.build_prefix {
             cc_build.compile(format!("{}_crypto", prefix.as_str()).as_str());
         } else {
@@ -392,7 +543,11 @@ impl CcBuilder {
     // This performs basic checks of compiler capabilities and sets an appropriate flag on success.
     // This should be kept in alignment with the checks performed by AWS-LC's CMake build.
     // See: https://github.com/search?q=repo%3Aaws%2Faws-lc%20check_compiler&type=code
-    fn compiler_check(&self, basename: &str) -> bool {
+    fn compiler_check<T, S>(&self, basename: &str, extra_flags: T) -> bool
+    where
+        T: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
         let mut ret_val = false;
         let output_dir = self.out_dir.join(format!("out-{basename}"));
         let source_file = self
@@ -404,7 +559,7 @@ impl CcBuilder {
         if !source_file.exists() {
             emit_warning("######");
             emit_warning("###### WARNING: MISSING GIT SUBMODULE ######");
-            emit_warning(&format!(
+            emit_warning(format!(
                 "  -- Did you initialize the repo's git submodules? Unable to find source file: {}.",
                 source_file.display()
             ));
@@ -417,6 +572,10 @@ impl CcBuilder {
             .file(source_file)
             .warnings_into_errors(true)
             .out_dir(&output_dir);
+        for flag in extra_flags {
+            let flag = flag.as_ref();
+            cc_build.flag(flag);
+        }
 
         let compiler = cc_build.get_compiler();
         if compiler.is_like_gnu() || compiler.is_like_clang() {
@@ -428,9 +587,9 @@ impl CcBuilder {
             ret_val = true;
         }
         if fs::remove_dir_all(&output_dir).is_err() {
-            emit_warning(&format!("Failed to remove {}", output_dir.display()));
+            emit_warning(format!("Failed to remove {}", output_dir.display()));
         }
-        emit_warning(&format!(
+        emit_warning(format!(
             "Compilation of '{basename}.c' {} - {:?}.",
             if ret_val { "succeeded" } else { "failed" },
             &result
@@ -453,6 +612,18 @@ impl CcBuilder {
             return;
         }
         let mut memcmp_compile_args = Vec::from(memcmp_compiler.args());
+
+        // This check invokes the compiled executable and hence needs to link
+        // it. CMake handles this via LDFLAGS but `cc` doesn't. In setups with
+        // custom linker setups this could lead to a mismatch between the
+        // expected and the actually used linker. Explicitly respecting LDFLAGS
+        // here brings us back to parity with CMake.
+        if let Ok(ldflags) = std::env::var("LDFLAGS") {
+            for flag in ldflags.split_whitespace() {
+                memcmp_compile_args.push(flag.into());
+            }
+        }
+
         memcmp_compile_args.push(
             self.manifest_dir
                 .join("aws-lc")
@@ -507,11 +678,27 @@ impl CcBuilder {
         let _ = fs::remove_file(exec_path);
     }
     fn run_compiler_checks(&self, cc_build: &mut cc::Build) {
-        if self.compiler_check("stdalign_check") {
+        if self.compiler_check("stdalign_check", Vec::<&'static str>::new()) {
             cc_build.define("AWS_LC_STDALIGN_AVAILABLE", Some("1"));
         }
-        if self.compiler_check("builtin_swap_check") {
+        if self.compiler_check("builtin_swap_check", Vec::<&'static str>::new()) {
             cc_build.define("AWS_LC_BUILTIN_SWAP_SUPPORTED", Some("1"));
+        }
+        if target_arch() == "aarch64"
+            && self.compiler_check("neon_sha3_check", vec!["-march=armv8.4-a+sha3"])
+        {
+            let mut compiler_features = self.compiler_features.take();
+            compiler_features.push(CompilerFeature::NeonSha3);
+            self.compiler_features.set(compiler_features);
+            cc_build.define("MY_ASSEMBLER_SUPPORTS_NEON_SHA3_EXTENSION", Some("1"));
+        }
+        if target_os() == "linux" {
+            if self.compiler_check("linux_random_h", Vec::<&'static str>::new()) {
+                cc_build.define("HAVE_LINUX_RANDOM_H", Some("1"));
+            } else if self.compiler_check("linux_random_h", vec!["-DDEFINE_U32"]) {
+                cc_build.define("HAVE_LINUX_RANDOM_H", Some("1"));
+                cc_build.define("AWS_LC_URANDOM_NEEDS_U32", Some("1"));
+            }
         }
         self.memcmp_check();
     }

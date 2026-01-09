@@ -114,7 +114,7 @@ extern "C" {
 // A consumer may use this symbol in the preprocessor to temporarily build
 // against multiple revisions of BoringSSL at the same time. It is not
 // recommended to do so for longer than is necessary.
-#define AWSLC_API_VERSION 32
+#define AWSLC_API_VERSION 35
 
 // This string tracks the most current production release version on Github
 // https://github.com/aws/aws-lc/releases.
@@ -122,7 +122,7 @@ extern "C" {
 // ServiceIndicatorTest.AWSLCVersionString
 // Note: there are two versions of this test. Only one test is compiled
 // depending on FIPS mode.
-#define AWSLC_VERSION_NUMBER_STRING "1.49.0"
+#define AWSLC_VERSION_NUMBER_STRING "1.66.0"
 
 #if defined(BORINGSSL_SHARED_LIBRARY)
 
@@ -153,6 +153,22 @@ extern "C" {
 #endif
 
 #endif  // defined(BORINGSSL_SHARED_LIBRARY)
+
+#if !defined(OPENSSL_WARN_UNUSED_RESULT)
+// This should only affect internal usage of functions
+#if defined(BORINGSSL_IMPLEMENTATION) || defined(AWS_LC_TEST_ENV)
+#if defined(__GNUC__) || defined(__clang__)
+# define OPENSSL_WARN_UNUSED_RESULT __attribute__ ((warn_unused_result))
+#elif defined(_MSC_VER)
+# define OPENSSL_WARN_UNUSED_RESULT _Check_return_
+#else
+# define OPENSSL_WARN_UNUSED_RESULT
+#endif
+#else
+// The macro is ignored by consumers
+# define OPENSSL_WARN_UNUSED_RESULT
+#endif
+#endif
 
 #if defined(_MSC_VER)
 
@@ -246,6 +262,12 @@ extern "C" {
 // (e.g. a |STACK_OF(T)| implementation) in a source file without tripping
 // clang's -Wunused-function.
 #define OPENSSL_INLINE static inline OPENSSL_UNUSED
+#endif
+
+#if defined(OPENSSL_WINDOWS)
+#define OPENSSL_NOINLINE __declspec(noinline)
+#else
+#define OPENSSL_NOINLINE __attribute__((noinline))
 #endif
 
 // ossl_ssize_t is a signed type which is large enough to fit the size of any

@@ -24,25 +24,7 @@ impl Algorithm {
         }
     }
 
-    fn algorithm_name(self) -> &'static str {
-        match self {
-            Self::Aes128Gcm => "AES-128-GCM",
-            Self::Aes256Gcm => "AES-256-GCM",
-            #[cfg(all(chacha, not(feature = "fips")))]
-            Self::ChaCha20Poly1305 => "ChaCha20-Poly1305",
-        }
-    }
-
     pub(crate) fn key_size(self) -> usize {
-        // For OpenSSL 3.x, fetch cipher from provider to get correct key size
-        let is_openssl_3 = openssl::version::number() >= 0x3_00_00_00_0;
-        if is_openssl_3 {
-            if let Ok(cipher) = Cipher::fetch(None, self.algorithm_name(), Some("fips=yes"))
-                .or_else(|_| Cipher::fetch(None, self.algorithm_name(), None))
-            {
-                return cipher.key_length();
-            }
-        }
         self.openssl_cipher().key_length()
     }
 
@@ -54,33 +36,16 @@ impl Algorithm {
         aad: &[u8],
         data: &mut [u8],
     ) -> Result<[u8; TAG_LEN], Error> {
-        // For OpenSSL 3.x, fetch cipher from FIPS provider at runtime
-        let is_openssl_3 = openssl::version::number() >= 0x3_00_00_00_0;
-
-        let fetched_cipher;
-        let cipher_ref: &CipherRef = if is_openssl_3 {
-            fetched_cipher = Cipher::fetch(None, self.algorithm_name(), Some("fips=yes"))
-                .or_else(|_| Cipher::fetch(None, self.algorithm_name(), None))
-                .map_err(|e| Error::General(format!("Failed to fetch cipher: {e}")))?;
-            &fetched_cipher
-        } else {
-            self.openssl_cipher()
-        };
-
         CipherCtx::new()
             .and_then(|mut ctx| {
-                // Two-step init required for OpenSSL 3.x FIPS provider
-                ctx.encrypt_init(Some(cipher_ref), None, None)?;
-                ctx.set_iv_length(NONCE_LEN)?;
-                ctx.encrypt_init(None, Some(key), Some(nonce))?;
+                ctx.encrypt_init(Some(self.openssl_cipher()), Some(key), Some(nonce))?;
                 // Providing no output buffer implies input is AAD.
                 ctx.cipher_update(aad, None)?;
                 // The ciphers are all stream ciphers, so we shound encrypt the same amount of data...
                 let count = ctx.cipher_update_inplace(data, data.len())?;
                 debug_assert!(count == data.len());
-                // Provide valid buffer for FIPS strict pointer validation
-                let mut final_buf = [0u8; 16];
-                let rest = ctx.cipher_final(&mut final_buf)?;
+                // ... and no more data should be written at the end.
+                let rest = ctx.cipher_final(&mut [])?;
                 debug_assert!(rest == 0);
                 let mut tag = [0u8; TAG_LEN];
                 ctx.tag(&mut tag)?;
@@ -106,35 +71,14 @@ impl Algorithm {
 
         let (ciphertext, tag) = data.split_at_mut(payload_len - TAG_LEN);
 
-        // For OpenSSL 3.x, fetch cipher from FIPS provider at runtime
-        // Runtime detection avoids mismatch between build-time and runtime OpenSSL versions
-        let is_openssl_3 = openssl::version::number() >= 0x3_00_00_00_0;
-
-        let fetched_cipher;
-        let cipher_ref: &CipherRef = if is_openssl_3 {
-            fetched_cipher = Cipher::fetch(None, self.algorithm_name(), Some("fips=yes"))
-                .or_else(|_| Cipher::fetch(None, self.algorithm_name(), None))
-                .map_err(|e| Error::General(format!("Failed to fetch cipher: {e}")))?;
-            &fetched_cipher
-        } else {
-            self.openssl_cipher()
-        };
-
         CipherCtx::new()
             .and_then(|mut ctx| {
-                // Two-step init required for OpenSSL 3.x FIPS provider
-                ctx.decrypt_init(Some(cipher_ref), None, None)?;
-
-                ctx.set_iv_length(NONCE_LEN)?;
-                ctx.decrypt_init(None, Some(key), Some(nonce))?;
-                // Set tag before processing data (FIPS requirement)
-                ctx.set_tag(tag)?;
+                ctx.decrypt_init(Some(self.openssl_cipher()), Some(key), Some(nonce))?;
                 ctx.cipher_update(aad, None)?;
+                ctx.set_tag(tag)?;
                 let count = ctx.cipher_update_inplace(ciphertext, ciphertext.len())?;
                 debug_assert!(count == ciphertext.len());
-                // Provide valid buffer for FIPS strict pointer validation
-                let mut final_buf = [0u8; 16];
-                let rest = ctx.cipher_final(&mut final_buf)?;
+                let rest = ctx.cipher_final(&mut [])?;
                 debug_assert!(rest == 0);
                 Ok(count + rest)
             })
