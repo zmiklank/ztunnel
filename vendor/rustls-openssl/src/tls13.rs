@@ -165,6 +165,13 @@ impl MessageDecrypter for Tls13Crypter {
     ) -> Result<InboundPlainMessage<'a>, Error> {
         let payload = &mut msg.payload;
         let aad = make_tls13_aad(payload.len());
+
+        // DEBUG: Check if iv contains key data
+        let key_bytes = self.key.as_ref();
+        let iv_bytes = self.iv.as_ref();
+        eprintln!("DEBUG decrypt: key[0..4]={:02x?}, iv[0..4]={:02x?}",
+                  &key_bytes[..4], &iv_bytes[..4]);
+
         let plaintext_len = self.algo.decrypt_in_place(
             self.key.as_ref(),
             &Nonce::new(&self.iv, seq).0,
