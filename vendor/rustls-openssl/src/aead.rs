@@ -1,7 +1,7 @@
 use openssl::cipher::{Cipher, CipherRef};
 use openssl::cipher_ctx::CipherCtx;
-use rustls::crypto::cipher::NONCE_LEN;
 use rustls::Error;
+use rustls::crypto::cipher::NONCE_LEN;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum Algorithm {
@@ -75,9 +75,9 @@ impl Algorithm {
             .and_then(|mut ctx| {
                 ctx.decrypt_init(Some(self.openssl_cipher()), Some(key), Some(nonce))?;
                 ctx.cipher_update(aad, None)?;
+                ctx.set_tag(tag)?;
                 let count = ctx.cipher_update_inplace(ciphertext, ciphertext.len())?;
                 debug_assert!(count == ciphertext.len());
-                ctx.set_tag(tag)?;
                 let rest = ctx.cipher_final(&mut [])?;
                 debug_assert!(rest == 0);
                 Ok(count + rest)
@@ -88,7 +88,7 @@ impl Algorithm {
 
 #[cfg(test)]
 mod test {
-    use wycheproof::{aead::TestFlag, TestResult};
+    use wycheproof::{TestResult, aead::TestFlag};
 
     fn test_aead(alg: super::Algorithm) {
         let test_name = match alg {

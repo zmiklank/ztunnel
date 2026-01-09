@@ -10,9 +10,9 @@
 # See Cargo.toml.orig for the original contents.
 
 [package]
-edition = "2021"
+edition = "2024"
 name = "rustls-openssl"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Tom Fay <tom@teamfay.co.uk>"]
 build = "build.rs"
 autolib = false
@@ -27,9 +27,14 @@ license = "MIT"
 repository = "https://github.com/tofay/rustls-openssl"
 
 [features]
-default = ["tls12"]
+default = [
+    "tls12",
+    "prefer-post-quantum",
+]
 fips = []
+prefer-post-quantum = []
 tls12 = ["rustls/tls12"]
+vendored = ["openssl/vendored"]
 
 [lib]
 name = "rustls_openssl"
