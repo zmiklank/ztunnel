@@ -74,10 +74,10 @@ impl Algorithm {
         CipherCtx::new()
             .and_then(|mut ctx| {
                 ctx.decrypt_init(Some(self.openssl_cipher()), Some(key), Some(nonce))?;
+                ctx.set_tag(tag)?;
                 ctx.cipher_update(aad, None)?;
                 let count = ctx.cipher_update_inplace(ciphertext, ciphertext.len())?;
                 debug_assert!(count == ciphertext.len());
-                ctx.set_tag(tag)?;
                 let rest = ctx.cipher_final(&mut [])?;
                 debug_assert!(rest == 0);
                 Ok(count + rest)
