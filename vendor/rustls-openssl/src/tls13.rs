@@ -94,6 +94,10 @@ impl Tls13AeadAlgorithm for aead::Algorithm {
     }
 
     fn decrypter(&self, key: AeadKey, iv: Iv) -> Box<dyn MessageDecrypter> {
+        // DEBUG: Check what rustls is passing
+        eprintln!("DEBUG decrypter called: key[0..4]={:02x?}, iv[0..4]={:02x?}",
+                  &key.as_ref()[..4], &iv.as_ref()[..4]);
+
         Box::new(Tls13Crypter {
             algo: *self,
             key,
