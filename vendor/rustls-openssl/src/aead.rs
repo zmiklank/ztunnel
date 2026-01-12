@@ -74,20 +74,28 @@ impl Algorithm {
         CipherCtx::new()
             .and_then(|mut ctx| {
                 // Three-step initialization to match OpenSSL's TLS 1.3 implementation
-                ctx.decrypt_init(Some(self.openssl_cipher()), None, None)?;
-                ctx.set_iv_length(NONCE_LEN)?;
-                ctx.decrypt_init(None, Some(key), None)?;
+                ctx.decrypt_init(Some(self.openssl_cipher()), None, None)
+                    .map_err(|e| { eprintln!("FIPS DEBUG: decrypt_init(cipher) failed: {}", e); e })?;
+                ctx.set_iv_length(NONCE_LEN)
+                    .map_err(|e| { eprintln!("FIPS DEBUG: set_iv_length failed: {}", e); e })?;
+                ctx.decrypt_init(None, Some(key), None)
+                    .map_err(|e| { eprintln!("FIPS DEBUG: decrypt_init(key) failed: {}", e); e })?;
                 // Set nonce separately - critical for FIPS mode
-                ctx.decrypt_init(None, None, Some(nonce))?;
+                ctx.decrypt_init(None, None, Some(nonce))
+                    .map_err(|e| { eprintln!("FIPS DEBUG: decrypt_init(nonce) failed: {}", e); e })?;
                 // Set tag AFTER nonce (matches OpenSSL tls13_meth.c:218-219)
-                ctx.set_tag(tag)?;
+                ctx.set_tag(tag)
+                    .map_err(|e| { eprintln!("FIPS DEBUG: set_tag failed: {}", e); e })?;
                 // Process AAD
-                ctx.cipher_update(aad, None)?;
+                ctx.cipher_update(aad, None)
+                    .map_err(|e| { eprintln!("FIPS DEBUG: cipher_update(aad) failed: {}", e); e })?;
                 // Decrypt ciphertext
-                let count = ctx.cipher_update_inplace(ciphertext, ciphertext.len())?;
+                let count = ctx.cipher_update_inplace(ciphertext, ciphertext.len())
+                    .map_err(|e| { eprintln!("FIPS DEBUG: cipher_update(ciphertext) failed: {}", e); e })?;
                 debug_assert!(count == ciphertext.len());
                 // Verify tag
-                let rest = ctx.cipher_final(&mut [])?;
+                let rest = ctx.cipher_final(&mut [])
+                    .map_err(|e| { eprintln!("FIPS DEBUG: cipher_final (tag verify) FAILED: {}", e); e })?;
                 debug_assert!(rest == 0);
                 Ok(count + rest)
             })
