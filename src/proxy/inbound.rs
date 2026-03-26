@@ -90,6 +90,7 @@ impl Inbound {
         let acceptor = InboundCertProvider {
             local_workload: self.pi.local_workload_information.clone(),
             crl_manager: self.pi.crl_manager.clone(),
+            pi: self.pi.clone(),
         };
 
         // Safety: we set nodelay directly in tls_server, so it is safe to convert to a normal listener.
@@ -723,6 +724,7 @@ impl InboundFlagError {
 struct InboundCertProvider {
     local_workload: Arc<LocalWorkloadInformation>,
     crl_manager: Option<Arc<tls::crl::CrlManager>>,
+    pi: Arc<ProxyInputs>,
 }
 
 #[async_trait::async_trait]
@@ -733,7 +735,15 @@ impl crate::tls::ServerCertProvider for InboundCertProvider {
             "fetching cert"
         );
         let cert = self.local_workload.fetch_certificate().await?;
-        Ok(Arc::new(cert.server_config(self.crl_manager.clone())?))
+        // Get TLS profile from xDS state, falling back to config
+        let state_tls_profile = self.pi.state.tls_profile();
+        let tls_profile = state_tls_profile
+            .as_deref()
+            .or(self.pi.cfg.tls_profile.as_deref());
+        Ok(Arc::new(cert.server_config(
+            self.crl_manager.clone(),
+            tls_profile,
+        )?))
     }
 }
 

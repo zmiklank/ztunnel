@@ -82,6 +82,7 @@ impl Outbound {
     pub(super) async fn run(self) {
         let pool = proxy::pool::WorkloadHBONEPool::new(
             self.pi.cfg.clone(),
+            self.pi.state.clone(),
             self.pi.socket_factory.clone(),
             self.pi.local_workload_information.clone(),
         );
@@ -158,18 +159,8 @@ pub(super) struct OutboundConnection {
 
 impl OutboundConnection {
     async fn proxy(&mut self, source_stream: TcpStream) {
-        let peer = match source_stream.peer_addr() {
-            Ok(addr) => addr,
-            Err(e) => {
-                debug!(
-                    component = "outbound",
-                    "failed to get peer address, dropping connection: {}", e
-                );
-                return;
-            }
-        };
-
-        let source_addr = socket::to_canonical(peer);
+        let source_addr =
+            socket::to_canonical(source_stream.peer_addr().expect("must receive peer addr"));
         let dst_addr = socket::orig_dst_addr_or_default(&source_stream);
         self.proxy_to(source_stream, source_addr, dst_addr).await;
     }
@@ -273,7 +264,12 @@ impl OutboundConnection {
                 .local_workload_information
                 .fetch_certificate()
                 .await?;
-            let connector = cert.outbound_connector(wl_key.dst_id.clone())?;
+            // Get TLS profile from xDS state, falling back to config
+            let state_tls_profile = self.pi.state.tls_profile();
+            let tls_profile = state_tls_profile
+                .as_deref()
+                .or(self.pi.cfg.tls_profile.as_deref());
+            let connector = cert.outbound_connector(wl_key.dst_id.clone(), tls_profile)?;
             let tls_stream = connector.connect(upgraded).await?;
             let (_, ssl) = tls_stream.get_ref();
             let peer_identity = identity_from_connection(ssl);
@@ -884,6 +880,7 @@ mod tests {
             id: TraceParent::new(),
             pool: WorkloadHBONEPool::new(
                 cfg.clone(),
+                state.clone(),
                 sock_fact,
                 local_workload_information.clone(),
             ),
@@ -1991,6 +1988,7 @@ mod tests {
             id: TraceParent::new(),
             pool: WorkloadHBONEPool::new(
                 cfg.clone(),
+                state.clone(),
                 sock_fact,
                 local_workload_information.clone(),
             ),

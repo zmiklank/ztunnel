@@ -32,6 +32,8 @@ use xds::istio::security::Authorization as XdsAuthorization;
 use xds::istio::workload::Address as XdsAddress;
 use xds::istio::workload::PortList;
 use xds::istio::workload::Service as XdsService;
+use xds::istio::workload::TlsProfile as XdsTlsProfile;
+use xds::istio::workload::TlsVersion as XdsTlsVersion;
 use xds::istio::workload::Workload as XdsWorkload;
 use xds::istio::workload::address::Type as XdsType;
 
@@ -382,6 +384,58 @@ impl Handler<XdsAuthorization> for ProxyStateUpdater {
                 Err(e)
             }
         }
+    }
+}
+
+impl Handler<XdsTlsProfile> for ProxyStateUpdater {
+    fn no_on_demand(&self) -> bool {
+        true
+    }
+
+    fn handle(
+        &self,
+        updates: Box<&mut dyn Iterator<Item = XdsUpdate<XdsTlsProfile>>>,
+    ) -> Result<(), Vec<RejectedConfig>> {
+        let mut state = self.state.write().unwrap();
+        let handle = |res: XdsUpdate<XdsTlsProfile>| {
+            match res {
+                XdsUpdate::Update(w) => {
+                    let profile = convert_tls_profile(&w.resource);
+                    info!(
+                        min_version = ?profile.min_protocol_version,
+                        cipher_suites = ?profile.cipher_suites,
+                        ecdh_curves = ?profile.ecdh_curves,
+                        "received TLS profile update from xDS"
+                    );
+                    profile.validate();
+                    state.tls_profile = Some(Arc::new(profile));
+                }
+                XdsUpdate::Remove(_name) => {
+                    info!("TLS profile removed, reverting to environment variable defaults");
+                    state.tls_profile = None;
+                }
+            }
+            Ok(())
+        };
+        handle_single_resource(updates, handle)
+    }
+}
+
+/// Convert proto TlsProfile to Rust TlsProfile.
+///
+/// Clones cipher_suites and ecdh_curves to decouple from proto lifetime.
+/// The resulting TlsProfile is wrapped in Arc<> and shared across connections,
+/// so the one-time clone cost is amortized over all TLS handshakes.
+fn convert_tls_profile(proto: &XdsTlsProfile) -> tls::TlsProfile {
+    let min_protocol_version = match proto.min_protocol_version() {
+        XdsTlsVersion::Tls12 => tls::TlsVersion::Tls12,
+        XdsTlsVersion::Tls13 => tls::TlsVersion::Tls13,
+    };
+
+    tls::TlsProfile {
+        min_protocol_version,
+        cipher_suites: proto.cipher_suites.clone(),
+        ecdh_curves: proto.ecdh_curves.clone(),
     }
 }
 

@@ -387,3 +387,29 @@ message Extension {
   // config provides some opaque configuration.
   google.protobuf.Any config = 2;
 }
+
+// TlsVersion represents the TLS protocol versions that can be configured.
+enum TlsVersion {
+  TLS_1_2 = 0;
+  TLS_1_3 = 1;
+}
+
+// TlsProfile defines the TLS configuration for mTLS connections.
+// This matches Istio's MeshConfig.meshMTLS (TLSConfig) structure to enable
+// seamless configuration flow from MeshConfig to ztunnel.
+message TlsProfile {
+  // Minimum TLS protocol version (required).
+  // Determines which TLS versions are enabled for connections.
+  TlsVersion min_protocol_version = 1;
+
+  // Cipher suites to enable, specified as standard TLS cipher suite names.
+  // Examples: "TLS_AES_256_GCM_SHA384", "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+  // If empty, defaults to provider's default cipher suites based on enabled TLS versions.
+  repeated string cipher_suites = 2;
+
+  // Key exchange groups (ECDH curves) for TLS handshake.
+  // Examples: "P-256", "P-384", "X25519", "X25519MLKEM768"
+  // If empty, defaults based on crypto provider capabilities.
+  // Note: "X25519MLKEM768" enables post-quantum cryptography if supported by the provider.
+  repeated string ecdh_curves = 3;
+}

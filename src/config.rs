@@ -324,6 +324,11 @@ pub struct Config {
     // path to CRL file; if set, enables CRL checking
     pub crl_path: Option<PathBuf>,
     pub enable_enhanced_baggage: bool,
+
+    /// Runtime TLS profile configuration
+    /// Allows dynamic configuration of TLS protocol versions, cipher suites, and PQC
+    #[serde(skip_serializing)]
+    pub tls_profile: Option<Arc<crate::tls::TlsProfile>>,
 }
 
 #[derive(serde::Serialize, Clone, Copy, Debug)]
@@ -884,6 +889,9 @@ pub fn construct_config(pc: ProxyConfig) -> Result<Config, Error> {
             .filter(|s| !s.is_empty())
             .map(PathBuf::from),
         enable_enhanced_baggage: parse_default(ENABLE_ENHANCED_BAGGAGE, true)?,
+
+        // TLS profile starts as None, can be configured at runtime via xDS
+        tls_profile: None,
     })
 }
 

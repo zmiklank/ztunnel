@@ -29,6 +29,7 @@ use crate::strng::Strng;
 use crate::tls;
 use crate::xds::istio::security::Authorization as XdsAuthorization;
 use crate::xds::istio::workload::Address as XdsAddress;
+use crate::xds::istio::workload::TlsProfile as XdsTlsProfile;
 use crate::xds::{AdsClient, Demander, LocalClient, ProxyStateUpdater};
 use crate::{cert_fetcher, config, rbac, xds};
 use crate::{proxy, strng};
@@ -179,6 +180,10 @@ pub struct ProxyState {
     pub services: ServiceStore,
 
     pub policies: PolicyStore,
+
+    /// Runtime TLS profile configuration received from xDS.
+    /// When set, overrides environment variable TLS settings.
+    pub tls_profile: Option<Arc<crate::tls::TlsProfile>>,
 }
 
 #[derive(serde::Serialize, Debug)]
@@ -237,6 +242,7 @@ impl ProxyState {
             workloads: WorkloadStore::new(local_node),
             services: Default::default(),
             policies: Default::default(),
+            tls_profile: None,
         }
     }
 
@@ -509,6 +515,12 @@ impl DemandProxyState {
             .expect("mutex")
             .services
             .get_by_workload(wl)
+    }
+
+    /// Get the current TLS profile from xDS, if available.
+    /// Returns None if no TLS profile has been received from the control plane.
+    pub fn tls_profile(&self) -> Option<Arc<crate::tls::TlsProfile>> {
+        self.state.read().expect("mutex").tls_profile.clone()
     }
 }
 
@@ -1110,7 +1122,9 @@ impl ProxyStateManager {
             Some(
                 xds::Config::new(config.clone(), tls_client_fetcher)
                     .with_watched_handler::<XdsAddress>(xds::ADDRESS_TYPE, updater.clone())
-                    .with_watched_handler::<XdsAuthorization>(xds::AUTHORIZATION_TYPE, updater)
+                    .with_watched_handler::<XdsAuthorization>(xds::AUTHORIZATION_TYPE, updater.clone())
+                    // TlsProfile is optional - don't block readiness if istiod doesn't send one
+                    .with_optional_watched_handler::<XdsTlsProfile>(xds::TLS_PROFILE_TYPE, updater)
                     .build(xds_metrics, awaiting_ready),
             )
         } else {

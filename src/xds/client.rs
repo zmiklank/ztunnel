@@ -277,6 +277,16 @@ impl Config {
             .watch(type_url, no_on_demand)
     }
 
+    /// Like with_watched_handler, but doesn't block readiness.
+    /// Use this for optional xDS resources where not receiving a response is acceptable.
+    pub fn with_optional_watched_handler<F>(self, type_url: Strng, f: impl Handler<F>) -> Config
+    where
+        F: 'static + fmt::Debug + prost::Message + Default,
+    {
+        self.with_handler(type_url.clone(), f)
+            .watch_optional(type_url)
+    }
+
     fn with_handler<F>(mut self, type_url: Strng, f: impl Handler<F>) -> Config
     where
         F: 'static + fmt::Debug + prost::Message + Default,
@@ -289,6 +299,24 @@ impl Config {
     fn watch(mut self, type_url: Strng, no_on_demand: bool) -> Config {
         self.initial_requests
             .push(self.construct_initial_request(type_url, no_on_demand));
+        self
+    }
+
+    /// Subscribe to a resource type but don't block readiness waiting for a response.
+    /// The initial request uses a wildcard subscribe/unsubscribe pattern so it appears
+    /// as "on-demand" and won't be added to types_to_expect.
+    fn watch_optional(mut self, type_url: Strng) -> Config {
+        let node = self.node();
+        // Use wildcard subscribe/unsubscribe pattern so this appears as "on-demand"
+        // and won't block readiness (see is_initial_request_on_demand check in AdsClient::new)
+        let req = DeltaDiscoveryRequest {
+            type_url: type_url.to_string(),
+            node: Some(node.clone()),
+            resource_names_subscribe: vec!["*".to_string()],
+            resource_names_unsubscribe: vec![],
+            ..Default::default()
+        };
+        self.initial_requests.push(req);
         self
     }
 

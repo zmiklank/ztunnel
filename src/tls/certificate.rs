@@ -301,6 +301,7 @@ impl WorkloadCertificate {
     pub fn server_config(
         &self,
         crl_manager: Option<Arc<crate::tls::crl::CrlManager>>,
+        tls_profile: Option<&crate::tls::TlsProfile>,
     ) -> Result<ServerConfig, Error> {
         let td = self.cert.identity().map(|i| match i {
             Identity::Spiffe { trust_domain, .. } => trust_domain,
@@ -309,7 +310,7 @@ impl WorkloadCertificate {
         // build the base client cert verifier with optional CRL support
         let mut builder = WebPkiClientVerifier::builder_with_provider(
             self.root_store.clone(),
-            crate::tls::lib::provider(),
+            crate::tls::lib::provider(tls_profile),
         );
 
         // add CRLs if available
@@ -325,8 +326,8 @@ impl WorkloadCertificate {
 
         let client_cert_verifier =
             crate::tls::workload::TrustDomainVerifier::new(raw_client_cert_verifier, td);
-        let mut sc = ServerConfig::builder_with_provider(crate::tls::lib::provider())
-            .with_protocol_versions(tls::tls_versions())
+        let mut sc = ServerConfig::builder_with_provider(crate::tls::lib::provider(tls_profile))
+            .with_protocol_versions(tls::tls_versions(tls_profile))
             .expect("server config must be valid")
             .with_client_cert_verifier(client_cert_verifier)
             .with_single_cert(
@@ -339,11 +340,15 @@ impl WorkloadCertificate {
 
     // TODO: add CRL support for outbound connections (client verifying server certs)
     // this requires a separate design due to complexity - deferred for follow-up
-    pub fn client_config(&self, identity: Vec<Identity>) -> Result<ClientConfig, rustls::Error> {
+    pub fn client_config(
+        &self,
+        identity: Vec<Identity>,
+        tls_profile: Option<&crate::tls::TlsProfile>,
+    ) -> Result<ClientConfig, rustls::Error> {
         let roots = self.root_store.clone();
         let verifier = IdentityVerifier { roots, identity };
-        let mut cc = ClientConfig::builder_with_provider(crate::tls::lib::provider())
-            .with_protocol_versions(tls::tls_versions())
+        let mut cc = ClientConfig::builder_with_provider(crate::tls::lib::provider(tls_profile))
+            .with_protocol_versions(tls::tls_versions(tls_profile))
             .expect("client config must be valid")
             .dangerous() // Customer verifier is requires "dangerous" opt-in
             .with_custom_certificate_verifier(Arc::new(verifier))
@@ -357,8 +362,12 @@ impl WorkloadCertificate {
         Ok(cc)
     }
 
-    pub fn outbound_connector(&self, identity: Vec<Identity>) -> Result<OutboundConnector, Error> {
-        let cc = self.client_config(identity)?;
+    pub fn outbound_connector(
+        &self,
+        identity: Vec<Identity>,
+        tls_profile: Option<&crate::tls::TlsProfile>,
+    ) -> Result<OutboundConnector, Error> {
+        let cc = self.client_config(identity, tls_profile)?;
         Ok(OutboundConnector {
             client_config: Arc::new(cc),
         })
@@ -466,7 +475,7 @@ mod test {
             WorkloadCertificate::new(key.as_bytes(), cert.as_bytes(), vec![&joined]).unwrap();
 
         // Do a simple handshake between them; we should be able to accept the trusted root
-        let server = cert1.server_config(None).unwrap();
+        let server = cert1.server_config(None, None).unwrap();
         let tls = TlsAcceptor::from(Arc::new(server));
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -477,7 +486,7 @@ mod test {
         });
 
         let stream = TcpStream::connect(addr).await.unwrap();
-        let client = cert2.outbound_connector(vec![id]).unwrap();
+        let client = cert2.outbound_connector(vec![id], None).unwrap();
         let mut tls = client.connect(stream).await.unwrap();
 
         let _ = tls.write(b"hi").await.unwrap();
